@@ -1,0 +1,129 @@
+package httpio
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io/ioutil"
+	"net/http"
+	"net/url"
+)
+
+var ErrReadFromSource = errors.New("read from source")
+var ErrRangeReadNotSupported = errors.New("range reads not supported")
+var ErrRangeReadNotSatisfied = errors.New("range not satisfied")
+
+type Options struct {
+	client *http.Client
+	url    string
+}
+
+type Option func(*Options)
+
+type ReadAtCloser struct {
+	options       *Options
+	contentLength int64
+
+	cancel context.CancelFunc
+}
+
+func NewReadAtCloser(opts ...Option) (r *ReadAtCloser, err error) {
+	r = new(ReadAtCloser)
+
+	for _, opt := range opts {
+		opt(r.options)
+	}
+
+	r.options.ensureClient()
+
+	if err := r.options.validateUrl(); err != nil {
+		return nil, err
+	}
+
+	if r.contentLength, err = r.options.headURL(); err != nil {
+		return nil, err
+	}
+
+	return r, nil
+}
+
+func WithClient(c http.Client) Option {
+	return func(o *Options) {
+		o.client = &c
+	}
+}
+
+func WithURL(url string) Option {
+	return func(o *Options) {
+		o.url = url
+	}
+}
+
+func (o *Options) ensureClient() {
+	if o.client == nil {
+		o.client = new(http.Client)
+	}
+}
+
+func (o *Options) validateUrl() error {
+	_, err := url.Parse(o.url)
+	return err
+}
+
+func (o *Options) headURL() (int64, error) {
+	head, err := o.client.Head(o.url)
+	if err != nil {
+		return 0, err
+	}
+
+	if head.Header.Get("accept-ranges") != "bytes" {
+		return 0, ErrRangeReadNotSupported
+	}
+
+	return head.ContentLength, nil
+}
+
+// ReadAt satisfies the io.ReaderAt interface. It requires that
+func (r *ReadAtCloser) ReadAt(b []byte, start int64) (n int, err error) {
+	end := start + int64(len(b))
+	if r.contentLength < end {
+		return 0, ErrReadFromSource
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	r.cancel = cancel
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.options.url, nil)
+	if err != nil {
+		return 0, err
+	}
+
+	requestRange := fmt.Sprintf("bytes=%d-%d", start, end)
+	req.Header.Add("Range", requestRange)
+
+	res, err := r.options.client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+
+	if res.StatusCode != http.StatusPartialContent {
+		return 0, ErrRangeReadNotSatisfied
+	}
+
+	bt := make([]byte, len(b))
+	bt, err = ioutil.ReadAll(res.Body)
+
+	copy(b, bt)
+
+	return int(res.ContentLength), nil
+}
+
+// Close cancels the client context and closes any idle connections.
+func (r *ReadAtCloser) Close() error {
+	// Ensure a cancellable context has been created else r.cancel will be nil.
+	if r.cancel != nil {
+		r.cancel()
+	}
+
+	r.options.client.CloseIdleConnections()
+	return nil
+}
