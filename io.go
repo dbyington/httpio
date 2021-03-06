@@ -107,6 +107,10 @@ func (o *Options) HashURL() (hash.Hash, error) {
 	return Sha256SumReader(res.Body)
 }
 
+func (r *ReadAtCloser) HashURL() (hash.Hash, error) {
+    return r.options.HashURL()
+}
+
 // ReadAt satisfies the io.ReaderAt interface. It requires that
 func (r *ReadAtCloser) ReadAt(b []byte, start int64) (n int, err error) {
 	end := start + int64(len(b))
@@ -154,6 +158,11 @@ func (r *ReadAtCloser) Close() error {
 
 	r.options.client.CloseIdleConnections()
 	return nil
+}
+
+
+func (r *ReadCloser) HashURL() (hash.Hash, error) {
+    return r.options.HashURL()
 }
 
 func (r *ReadCloser) Read(p []byte) (n int, err error) {
