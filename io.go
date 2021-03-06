@@ -61,9 +61,9 @@ func NewReadAtCloser(opts ...Option) (r *ReadAtCloser, err error) {
 	return r, nil
 }
 
-func WithClient(c http.Client) Option {
+func WithClient(c *http.Client) Option {
 	return func(o *Options) {
-		o.client = &c
+		o.client = c
 	}
 }
 
