@@ -2,16 +2,24 @@ package httpio
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
+	"hash"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"net/url"
 )
 
-var ErrReadFromSource = errors.New("read from source")
-var ErrRangeReadNotSupported = errors.New("range reads not supported")
-var ErrRangeReadNotSatisfied = errors.New("range not satisfied")
+var (
+	ErrReadFailed            = errors.New("read failed")
+	ErrReadFromSource        = errors.New("read from source")
+	ErrRangeReadNotSupported = errors.New("range reads not supported")
+	ErrRangeReadNotSatisfied = errors.New("range not satisfied")
+)
+
+const ReadSizeLimit = 32768
 
 type Options struct {
 	client *http.Client
@@ -19,6 +27,12 @@ type Options struct {
 }
 
 type Option func(*Options)
+
+type ReadCloser struct {
+	options *Options
+
+	cancel context.CancelFunc
+}
 
 type ReadAtCloser struct {
 	options       *Options
@@ -83,6 +97,16 @@ func (o *Options) headURL() (int64, error) {
 	return head.ContentLength, nil
 }
 
+func (o *Options) HashURL() (hash.Hash, error) {
+	res, err := o.client.Get(o.url)
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	return Sha256SumReader(res.Body)
+}
+
 // ReadAt satisfies the io.ReaderAt interface. It requires that
 func (r *ReadAtCloser) ReadAt(b []byte, start int64) (n int, err error) {
 	end := start + int64(len(b))
@@ -114,7 +138,11 @@ func (r *ReadAtCloser) ReadAt(b []byte, start int64) (n int, err error) {
 
 	copy(b, bt)
 
-	return int(res.ContentLength), nil
+	l := int64(len(b))
+	if l > res.ContentLength {
+		l = res.ContentLength
+	}
+	return int(l), nil
 }
 
 // Close cancels the client context and closes any idle connections.
@@ -126,4 +154,56 @@ func (r *ReadAtCloser) Close() error {
 
 	r.options.client.CloseIdleConnections()
 	return nil
+}
+
+func (r *ReadCloser) Read(p []byte) (n int, err error) {
+	ctx, cancel := context.WithCancel(context.Background())
+	r.cancel = cancel
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.options.url, nil)
+	if err != nil {
+		return 0, err
+	}
+
+	res, err := r.options.client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+
+	if res.StatusCode != http.StatusOK {
+		return 0, ErrReadFailed
+	}
+
+	bt := make([]byte, len(p))
+	bt, err = ioutil.ReadAll(res.Body)
+
+	copy(p, bt)
+
+	l := int64(len(p))
+	if l > res.ContentLength {
+		l = res.ContentLength
+	}
+	return int(l), nil
+}
+
+// Close cancels the client context and closes any idle connections.
+func (r *ReadCloser) Close() error {
+	// Ensure a cancellable context has been created else r.cancel will be nil.
+	if r.cancel != nil {
+		r.cancel()
+	}
+
+	r.options.client.CloseIdleConnections()
+	return nil
+}
+
+// Sha256SumReader reads from r until and calculates the sha256 sum, until r is exhausted.
+func Sha256SumReader(r io.Reader) (hash.Hash, error) {
+	shaSum := sha256.New()
+
+	buf := make([]byte, ReadSizeLimit)
+	if _, err := io.CopyBuffer(shaSum, r, buf); err != nil {
+		return nil, err
+	}
+
+	return shaSum, nil
 }
