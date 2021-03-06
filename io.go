@@ -111,6 +111,10 @@ func (r *ReadAtCloser) HashURL() (hash.Hash, error) {
     return r.options.HashURL()
 }
 
+func (r *ReadAtCloser) Length() int64 {
+    return r.contentLength
+}
+
 // ReadAt satisfies the io.ReaderAt interface. It requires that
 func (r *ReadAtCloser) ReadAt(b []byte, start int64) (n int, err error) {
 	end := start + int64(len(b))
