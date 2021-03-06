@@ -13,6 +13,8 @@ import (
 )
 
 var (
+	ErrInvalidURLHost        = errors.New("invalid url host")
+	ErrInvalidURLScheme      = errors.New("invalid url scheme")
 	ErrReadFailed            = errors.New("read failed")
 	ErrReadFromSource        = errors.New("read from source")
 	ErrRangeReadNotSupported = errors.New("range reads not supported")
@@ -42,23 +44,26 @@ type ReadAtCloser struct {
 }
 
 func NewReadAtCloser(opts ...Option) (r *ReadAtCloser, err error) {
-	r = new(ReadAtCloser)
-
+	o := new(Options)
 	for _, opt := range opts {
-		opt(r.options)
+		opt(o)
 	}
 
-	r.options.ensureClient()
+	o.ensureClient()
 
-	if err := r.options.validateUrl(); err != nil {
+	if err := o.validateUrl(); err != nil {
 		return nil, err
 	}
 
-	if r.contentLength, err = r.options.headURL(); err != nil {
+	contentLength, err := o.headURL()
+	if err != nil {
 		return nil, err
 	}
 
-	return r, nil
+	return &ReadAtCloser{
+		contentLength: contentLength,
+		options:       o,
+	}, nil
 }
 
 func WithClient(c *http.Client) Option {
@@ -80,8 +85,20 @@ func (o *Options) ensureClient() {
 }
 
 func (o *Options) validateUrl() error {
-	_, err := url.Parse(o.url)
-	return err
+	u, err := url.Parse(o.url)
+	if err != nil {
+		return err
+	}
+
+	if u.Scheme == "" {
+		return ErrInvalidURLScheme
+	}
+
+	if u.Hostname() == "" {
+		return ErrInvalidURLHost
+	}
+
+	return nil
 }
 
 func (o *Options) headURL() (int64, error) {
@@ -108,11 +125,11 @@ func (o *Options) HashURL() (hash.Hash, error) {
 }
 
 func (r *ReadAtCloser) HashURL() (hash.Hash, error) {
-    return r.options.HashURL()
+	return r.options.HashURL()
 }
 
 func (r *ReadAtCloser) Length() int64 {
-    return r.contentLength
+	return r.contentLength
 }
 
 // ReadAt satisfies the io.ReaderAt interface. It requires that
@@ -164,9 +181,8 @@ func (r *ReadAtCloser) Close() error {
 	return nil
 }
 
-
 func (r *ReadCloser) HashURL() (hash.Hash, error) {
-    return r.options.HashURL()
+	return r.options.HashURL()
 }
 
 func (r *ReadCloser) Read(p []byte) (n int, err error) {
