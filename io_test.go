@@ -34,12 +34,13 @@ var _ = Describe("io", func() {
 			var (
 				expectLen int64
 				expectUrl *url.URL
+				etag string
 				err       error
 				len       int64
 			)
 
 			JustBeforeEach(func() {
-				len, err = options.headURL()
+				len, etag, err = options.headURL(nil)
 			})
 
 			BeforeEach(func() {
@@ -60,6 +61,10 @@ var _ = Describe("io", func() {
 
 				It("should return a zero length", func() {
 					Ω(len).To(BeZero())
+				})
+
+				It("should return an empty etag", func() {
+					Ω(etag).To(BeEmpty())
 				})
 			})
 
