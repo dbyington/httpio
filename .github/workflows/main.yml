@@ -2,9 +2,13 @@ name: Go
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
+      - 'releases/**'
+      - '!releases/**-alpha'
   pull_request:
     branches: [ main ]
+  release:
 
 jobs:
 
