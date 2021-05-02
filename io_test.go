@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"hash"
+	"io"
 	"net/http"
 	"net/url"
 
@@ -35,7 +36,7 @@ var _ = Describe("io", func() {
 			server.AppendHandlers(ghttp.CombineHandlers(mockHandler.ServeHTTP))
 		})
 
-		Context("#headURL", func() {
+		Context(".headURL", func() {
 			var (
 				expectLen int64
 				expectUrl *url.URL
@@ -97,7 +98,7 @@ var _ = Describe("io", func() {
 
 		})
 
-		Context("#WithClient", func() {
+		Context(".WithClient", func() {
 			var (
 				c *http.Client
 				o Option
@@ -133,7 +134,7 @@ var _ = Describe("io", func() {
 			})
 		})
 
-		Context("#WithURL", func() {
+		Context(".WithURL", func() {
 			var (
 				u string
 				o Option
@@ -156,7 +157,7 @@ var _ = Describe("io", func() {
 			})
 		})
 
-		Context("#validateUrl", func() {
+		Context(".validateUrl", func() {
 			var (
 				u   string
 				err error
@@ -204,7 +205,7 @@ var _ = Describe("io", func() {
 			})
 		})
 
-		Context("#hashURL", func() {
+		Context(".hashURL", func() {
 			var (
 				hashScheme uint
 				hashResult hash.Hash
@@ -314,14 +315,16 @@ var _ = Describe("io", func() {
 					readLength := len(fullBody)
 					target = make([]byte, readLength)
 					start = 5
+					mockHandler.expect(http.MethodGet, expectUrl, rangeHead(int(start), int(start)+readLength))
+					mockHandler.response(http.StatusPartialContent, fullBody, nil)
 				})
 
 				It("should return an error", func() {
-					Expect(err).To(MatchError(ErrReadFromSource))
+					Expect(err).To(MatchError(io.ErrUnexpectedEOF))
 				})
 
-				It("should return a zero length", func() {
-					Expect(readLen).To(BeZero())
+				It("should return a length", func() {
+					Expect(readLen).To(Equal(len(fullBody) - int(start)))
 				})
 			})
 
