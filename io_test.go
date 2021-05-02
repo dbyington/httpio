@@ -3,6 +3,7 @@ package httpio
 import (
 	"context"
 	"fmt"
+	"hash"
 	"net/http"
 	"net/url"
 
@@ -22,7 +23,11 @@ var _ = Describe("io", func() {
 	})
 
 	Context("Options", func() {
-		var options *Options
+		var (
+			options *Options
+
+			testOptions *Options
+		)
 
 		BeforeEach(func() {
 			server = ghttp.NewServer()
@@ -30,17 +35,17 @@ var _ = Describe("io", func() {
 			server.AppendHandlers(ghttp.CombineHandlers(mockHandler.ServeHTTP))
 		})
 
-		Context(".headURL", func() {
+		Context("#headURL", func() {
 			var (
 				expectLen int64
 				expectUrl *url.URL
-				etag string
+				etag      string
 				err       error
-				len       int64
+				l         int64
 			)
 
 			JustBeforeEach(func() {
-				len, etag, err = options.headURL(nil)
+				l, etag, err = options.headURL(nil)
 			})
 
 			BeforeEach(func() {
@@ -60,7 +65,7 @@ var _ = Describe("io", func() {
 				})
 
 				It("should return a zero length", func() {
-					Ω(len).To(BeZero())
+					Ω(l).To(BeZero())
 				})
 
 				It("should return an empty etag", func() {
@@ -86,7 +91,7 @@ var _ = Describe("io", func() {
 				})
 
 				It("should return the content length", func() {
-					Ω(len).To(Equal(expectLen))
+					Ω(l).To(Equal(expectLen))
 				})
 			})
 
@@ -96,8 +101,6 @@ var _ = Describe("io", func() {
 			var (
 				c *http.Client
 				o Option
-
-				testOptions *Options
 			)
 
 			JustBeforeEach(func() {
@@ -134,8 +137,6 @@ var _ = Describe("io", func() {
 			var (
 				u string
 				o Option
-
-				testOptions *Options
 			)
 
 			JustBeforeEach(func() {
@@ -155,11 +156,10 @@ var _ = Describe("io", func() {
 			})
 		})
 
-		Context(".validateUrl", func() {
+		Context("#validateUrl", func() {
 			var (
-				u           string
-				err         error
-				testOptions *Options
+				u   string
+				err error
 			)
 
 			JustBeforeEach(func() {
@@ -200,6 +200,46 @@ var _ = Describe("io", func() {
 
 				It("should leave the url", func() {
 					Expect(testOptions.url).To(Equal(u))
+				})
+			})
+		})
+
+		Context("#hashURL", func() {
+			var (
+				hashScheme uint
+				hashResult hash.Hash
+				err        error
+
+				expectUrl *url.URL
+			)
+
+			JustBeforeEach(func() {
+				hashResult, err = options.hashURL(hashScheme)
+			})
+
+			BeforeEach(func() {
+				expectUrl, _ = url.Parse(server.URL() + "/foo")
+				options = &Options{
+					client: &http.Client{},
+					url:    expectUrl.String(),
+				}
+			})
+
+			Context("with a client request error", func() {
+				var expectErr string
+
+				BeforeEach(func() {
+					mockHandler.expect(http.MethodGet, expectUrl, http.Header{"Accept-Encoding": []string{"gzip"}})
+					mockHandler.response(http.StatusBadRequest, nil, nil)
+					expectErr = fmt.Sprintf("Error requesting %s, received code: 400 Bad Request", expectUrl.String())
+				})
+
+				It("should return an error", func() {
+					Expect(err).To(MatchError(expectErr))
+				})
+
+				It("should return a nil interface", func() {
+					Expect(hashResult).To(BeNil())
 				})
 			})
 		})
