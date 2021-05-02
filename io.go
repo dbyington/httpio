@@ -163,7 +163,6 @@ func (o *Options) headURL(expectHeaders map[string]string) (int64, string, error
 
 func (o *Options) hashURL(hashSize uint) (hash.Hash, error) {
 	res, err := o.client.Get(o.url)
-	fmt.Println(err)
 	if err != nil {
 		return nil, err
 	}
