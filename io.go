@@ -199,9 +199,6 @@ func (r *ReadAtCloser) Etag() string {
 // ReadAt satisfies the io.ReaderAt interface. It requires the ReadAtCloser be previously configured.
 func (r *ReadAtCloser) ReadAt(b []byte, start int64) (n int, err error) {
 	end := start + int64(len(b))
-	if r.contentLength < end {
-		return 0, ErrReadFromSource
-	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	r.cancel = cancel
@@ -226,6 +223,10 @@ func (r *ReadAtCloser) ReadAt(b []byte, start int64) (n int, err error) {
 	bt, err = ioutil.ReadAll(res.Body)
 
 	copy(b, bt)
+
+	if r.contentLength < end {
+		return int(res.ContentLength - start), io.ErrUnexpectedEOF
+	}
 
 	l := int64(len(b))
 	if l > res.ContentLength {
