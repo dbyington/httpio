@@ -1,6 +1,7 @@
 package httpio
 
 import (
+	"bytes"
 	"context"
 	"crypto/md5"
 	"crypto/sha256"
@@ -9,9 +10,11 @@ import (
 	"hash"
 	"io"
 	"io/ioutil"
+	"math"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 )
 
 // Possible errors
@@ -63,6 +66,7 @@ type ReadCloser struct {
 }
 
 // ReadAtCloser contains the required options and metadata to implement io.ReadAtCloser on a URL.
+// Use the Options to configure the ReadAtCloser with an http.Client, URL, and any additional http.Header values that should be sent with the request.
 type ReadAtCloser struct {
 	options       *Options
 	contentLength int64
@@ -175,15 +179,88 @@ func (o *Options) hashURL(hashSize uint) (hash.Hash, error) {
 
 	switch hashSize {
 	case sha256.Size:
-		return Sha256SumReader(res.Body)
+		return sha256SumReader(res.Body)
 	default:
 		return md5SumReader(res.Body)
 	}
 }
 
-// HashURL takes the hash scheme size (sha256.Size or md5.Size) and returns the hashed URL body in the supplied scheme as a hash.Hash interface.
-func (r *ReadAtCloser) HashURL(size uint) (hash.Hash, error) {
-	return r.options.hashURL(size)
+// HashURL takes the hash scheme as a uint (either sha256.Size or md5.Size) and the chunk size, to chunk the hashing into, and returns the hashed URL body in the supplied scheme as a slice of hash.Hash.
+// Setting the chunk size to 0 is translated to "do not chunk" and will hash the content as one.
+func (r *ReadAtCloser) HashURL(scheme uint, chunk int64) ([]hash.Hash, error) {
+	if chunk <= 0 {
+		chunk = r.contentLength
+	}
+	var chunks int64
+
+	// If the chunk size is greater than the content length reset it to the available length and set number of chunks to 1.
+	// Otherwise we need to divide the length by the number of chunks and round up. The final chunk will be the sum of the remainder.
+	if chunk > r.contentLength {
+		chunk = r.contentLength
+		chunks = 1
+	} else {
+		chunks = int64(math.Ceil(float64(r.contentLength) / float64(chunk)))
+	}
+
+	var hasher func(reader io.Reader) (hash.Hash, error)
+
+	switch scheme {
+	case sha256.Size:
+		hasher = sha256SumReader
+	default:
+		hasher = md5SumReader
+	}
+
+	hashes := make([]hash.Hash, chunks)
+	hashErrs := make([]error, chunks)
+	wg := sync.WaitGroup{}
+
+	for i := int64(0); i < chunks; i++ {
+		// create a copy of the ReadAtCloser to operate on
+		rOpt := *r.options
+		rac := *r
+		rac.options = &rOpt
+
+		wg.Add(1)
+		go func(w *sync.WaitGroup, idx int64, size int64, rac *ReadAtCloser) {
+			defer wg.Done()
+			b := make([]byte, size)
+			if _, err := rac.ReadAt(b, size*idx); err != nil {
+				hashErrs[idx] = err
+				if err != io.ErrUnexpectedEOF {
+					return
+				}
+			}
+
+			reader := bytes.NewReader(b[:])
+			h, err := hasher(reader)
+			if err != nil {
+				hashErrs[idx] = err
+				return
+			}
+
+			hashes[idx] = h
+		}(&wg, i, chunk, &rac)
+	}
+
+	wg.Wait()
+	if err := checkErrSlice(hashErrs); err != nil {
+		return hashes, err
+	}
+	return hashes, nil
+}
+
+func checkErrSlice(es []error) (err error) {
+	for _, e := range es {
+		if e != nil {
+			if err == nil {
+				err = fmt.Errorf("%s: %s", err, e)
+				continue
+			}
+			err = e
+		}
+	}
+	return nil
 }
 
 // Length returns the reported ContentLength of the URL body.
@@ -292,8 +369,8 @@ func (r *ReadCloser) Close() error {
 	return nil
 }
 
-// Sha256SumReader reads from r until and calculates the sha256 sum, until r is exhausted.
-func Sha256SumReader(r io.Reader) (hash.Hash, error) {
+// sha256SumReader reads from r until and calculates the sha256 sum, until r is exhausted.
+func sha256SumReader(r io.Reader) (hash.Hash, error) {
 	shaSum := sha256.New()
 
 	buf := make([]byte, ReadSizeLimit)
