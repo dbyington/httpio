@@ -185,22 +185,23 @@ func (o *Options) hashURL(hashSize uint) (hash.Hash, error) {
 	}
 }
 
-// HashURL takes the hash scheme as a uint (either sha256.Size or md5.Size) and the chunk size, to chunk the hashing into, and returns the hashed URL body in the supplied scheme as a slice of hash.Hash.
-// When the chunk size is < the content length the URL will be read, in parallel, to create the `hash.Hash` for each part of the file of `chunk` size.
-// Setting the chunk size to 0 is translated to "do not chunk" and will hash the content as one.
-func (r *ReadAtCloser) HashURL(scheme uint, chunk int64) ([]hash.Hash, error) {
-	if chunk <= 0 {
-		chunk = r.contentLength
+// HashURL takes the hash scheme as a uint (either sha256.Size or md5.Size) and the chunk size, and returns the hashed URL body in the supplied scheme as a slice of hash.Hash.
+// When the chunk size is less than the length of the content, the URL will be read with multiple, parallel range reads to create the slice of hash.Hash.
+// Specifying a chunkSize <= 0 is translated to "do not chunk" and the entire content will be hashed as one chunk.
+// The size and capacity of the returned slice of hash.Hash is equal to the number of chunks calculated based on the content length divided by the chunkSize, or 1 if chunkSize is equal to, or less than 0.
+func (r *ReadAtCloser) HashURL(scheme uint, chunkSize int64) ([]hash.Hash, error) {
+	if chunkSize <= 0 {
+		chunkSize = r.contentLength
 	}
 	var chunks int64
 
-	// If the chunk size is greater than the content length reset it to the available length and set number of chunks to 1.
-	// Otherwise we need to divide the length by the number of chunks and round up. The final chunk will be the sum of the remainder.
-	if chunk > r.contentLength {
-		chunk = r.contentLength
+	// If chunkSize is greater than the content length reset it to the available length and set number of chunks to 1.
+	// Otherwise we need to divide the length by the number of chunks and round up. The final chunkSize will be the sum of the remainder.
+	if chunkSize > r.contentLength {
+		chunkSize = r.contentLength
 		chunks = 1
 	} else {
-		chunks = int64(math.Ceil(float64(r.contentLength) / float64(chunk)))
+		chunks = int64(math.Ceil(float64(r.contentLength) / float64(chunkSize)))
 	}
 
 	var hasher func(reader io.Reader) (hash.Hash, error)
@@ -212,7 +213,7 @@ func (r *ReadAtCloser) HashURL(scheme uint, chunk int64) ([]hash.Hash, error) {
 		hasher = md5SumReader
 	}
 
-	hashes := make([]hash.Hash, chunks)
+	hashes := make([]hash.Hash, chunks, chunks)
 	hashErrs := make([]error, chunks)
 	wg := sync.WaitGroup{}
 
@@ -241,7 +242,7 @@ func (r *ReadAtCloser) HashURL(scheme uint, chunk int64) ([]hash.Hash, error) {
 			}
 
 			hashes[idx] = h
-		}(&wg, i, chunk, &rac)
+		}(&wg, i, chunkSize, &rac)
 	}
 
 	wg.Wait()
