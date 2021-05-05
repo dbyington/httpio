@@ -36,6 +36,10 @@ var _ = Describe("io", func() {
 			mockHTTP = newHTTPMock(server)
 		})
 
+		AfterEach(func() {
+			mockHTTP.finish()
+		})
+
 		Context(".headURL", func() {
 			var (
 				expectLen int64
@@ -261,6 +265,10 @@ var _ = Describe("io", func() {
 				client: &http.Client{},
 			}
 			readAtCloser = &ReadAtCloser{options: options}
+		})
+
+		AfterEach(func() {
+			mockHTTP.finish()
 		})
 
 		Context(".Close", func() {

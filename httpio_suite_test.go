@@ -45,8 +45,8 @@ func (h *httpMock) finish() {
 	h.mutex.Lock()
 	defer h.mutex.Unlock()
 	if len(h.expected) > 0 {
-	    Fail("unmatched expectations")
-    }
+		Fail("unmatched expectations")
+	}
 	h.expected = []*request{}
 }
 
