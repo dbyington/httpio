@@ -3,10 +3,13 @@ package httpio
 import (
 	"net/http"
 	"net/url"
+	"reflect"
+	"sync"
 	"testing"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/ghttp"
 )
 
 func TestHttpio(t *testing.T) {
@@ -14,7 +17,13 @@ func TestHttpio(t *testing.T) {
 	RunSpecs(t, "Httpio Suite")
 }
 
-type handler struct {
+type httpMock struct {
+	mutex    *sync.Mutex
+	expected []*request
+	server   *ghttp.Server
+}
+
+type request struct {
 	url    *url.URL
 	header http.Header
 	method string
@@ -24,42 +33,88 @@ type handler struct {
 	responseHeaders map[string][]string
 }
 
-func newMockHandler() *handler {
-	return &handler{responseHeaders: make(map[string][]string)}
+func newHTTPMock(s *ghttp.Server) *httpMock {
+	return &httpMock{
+		mutex:    new(sync.Mutex),
+		expected: []*request{},
+		server:   s,
+	}
 }
 
-func (h *handler) expect(method string, expectUrl *url.URL, header http.Header) {
-	h.url = expectUrl
-	h.header = header
-	h.method = method
+func (h *httpMock) finish() {
+	h.mutex.Lock()
+	defer h.mutex.Unlock()
+	if len(h.expected) > 0 {
+		Fail("unmatched expectations")
+	}
+	h.expected = []*request{}
 }
 
-func (h *handler) response(statusCode int, body []byte, headers map[string][]string) {
+func (h *httpMock) expect(method string, expectUrl *url.URL, header http.Header) *httpMock {
+	h.mutex.Lock()
+	defer h.mutex.Unlock()
+	h.expected = append(h.expected, &request{
+		url:             expectUrl,
+		method:          method,
+		header:          header,
+		responseHeaders: make(map[string][]string),
+	})
+	return h
+}
+
+func (h *httpMock) response(statusCode int, body []byte, headers map[string][]string) *httpMock {
+	h.mutex.Lock()
+	defer h.mutex.Unlock()
+
+	req := h.expected[len(h.expected)-1]
+
 	for k, v := range headers {
-		h.responseHeaders[k] = v
+		req.responseHeaders[k] = v
 	}
 
-	h.responseBody = body
-	h.responseCode = statusCode
+	req.responseBody = body
+	req.responseCode = statusCode
+
+	h.server.AppendHandlers(h.ServeHTTP)
+	return h
 }
 
-func (h *handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	Expect(req.Method).To(Equal(h.method))
-	Expect(req.URL.String()).To(Equal(h.url.Path))
+func (h *httpMock) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	h.mutex.Lock()
+	defer h.mutex.Unlock()
 
-	// Don't care about the UA header.
+	if len(h.expected) == 0 {
+		Fail("no expected requests")
+	}
+
+	// We don't care about the UA
 	req.Header.Del("User-Agent")
-	Expect(req.Header).To(Equal(h.header))
+	var (
+		matched bool
+		idx     int
+	)
+	for i, r := range h.expected {
+		if req.Method == r.method && req.URL.String() == r.url.Path && reflect.DeepEqual(req.Header, r.header) {
+			for k, v := range r.responseHeaders {
+				for _, s := range v {
+					w.Header().Set(k, s)
+				}
+			}
 
-	for k, v := range h.responseHeaders {
-		for _, s := range v {
-			w.Header().Set(k, s)
+			if r.responseCode != 0 {
+				w.WriteHeader(r.responseCode)
+			}
+
+			w.Write(r.responseBody)
+			matched = true
+			idx = i
+			break
 		}
 	}
 
-	if h.responseCode != 0 {
-		w.WriteHeader(h.responseCode)
+	if matched {
+		h.expected = append(h.expected[:idx], h.expected[idx+1:]...)
+		return
 	}
-
-	w.Write(h.responseBody)
+	Fail("request did not match any expected request")
 }

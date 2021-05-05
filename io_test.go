@@ -2,6 +2,7 @@ package httpio
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"hash"
 	"io"
@@ -15,8 +16,8 @@ import (
 
 var _ = Describe("io", func() {
 	var (
-		server      *ghttp.Server
-		mockHandler *handler
+		server   *ghttp.Server
+		mockHTTP *httpMock
 	)
 
 	AfterSuite(func() {
@@ -32,8 +33,11 @@ var _ = Describe("io", func() {
 
 		BeforeEach(func() {
 			server = ghttp.NewServer()
-			mockHandler = newMockHandler()
-			server.AppendHandlers(ghttp.CombineHandlers(mockHandler.ServeHTTP))
+			mockHTTP = newHTTPMock(server)
+		})
+
+		AfterEach(func() {
+			mockHTTP.finish()
 		})
 
 		Context(".headURL", func() {
@@ -57,8 +61,9 @@ var _ = Describe("io", func() {
 			Context("when the server does not support range reads", func() {
 				BeforeEach(func() {
 					options.url = expectUrl.String()
-					mockHandler.expect(http.MethodHead, expectUrl, http.Header{})
-					mockHandler.response(http.StatusBadRequest, nil, nil)
+					mockHTTP.expect(http.MethodHead, expectUrl, http.Header{}).
+						response(http.StatusBadRequest, nil, nil)
+
 				})
 
 				It("should return the error", func() {
@@ -79,12 +84,12 @@ var _ = Describe("io", func() {
 					expectLen = 42
 					expectLenString := fmt.Sprintf("%d", expectLen)
 					options.url = expectUrl.String()
-					mockHandler.expect(http.MethodHead, expectUrl, http.Header{})
+					mockHTTP.expect(http.MethodHead, expectUrl, http.Header{})
 					h := map[string][]string{
 						"accept-ranges":  {"bytes"},
 						"content-length": {expectLenString},
 					}
-					mockHandler.response(http.StatusBadRequest, nil, h)
+					mockHTTP.response(http.StatusBadRequest, nil, h)
 				})
 
 				It("should not error", func() {
@@ -230,8 +235,8 @@ var _ = Describe("io", func() {
 				var expectErr string
 
 				BeforeEach(func() {
-					mockHandler.expect(http.MethodGet, expectUrl, http.Header{"Accept-Encoding": []string{"gzip"}})
-					mockHandler.response(http.StatusBadRequest, nil, nil)
+					mockHTTP.expect(http.MethodGet, expectUrl, http.Header{"Accept-Encoding": []string{"gzip"}})
+					mockHTTP.response(http.StatusBadRequest, nil, nil)
 					expectErr = fmt.Sprintf("Error requesting %s, received code: 400 Bad Request", expectUrl.String())
 				})
 
@@ -253,14 +258,17 @@ var _ = Describe("io", func() {
 		)
 
 		BeforeEach(func() {
-			mockHandler = newMockHandler()
 			server = ghttp.NewServer()
-			server.AppendHandlers(ghttp.CombineHandlers(mockHandler.ServeHTTP))
+			mockHTTP = newHTTPMock(server)
 
 			options = &Options{
 				client: &http.Client{},
 			}
 			readAtCloser = &ReadAtCloser{options: options}
+		})
+
+		AfterEach(func() {
+			mockHTTP.finish()
 		})
 
 		Context(".Close", func() {
@@ -315,8 +323,8 @@ var _ = Describe("io", func() {
 					readLength := len(fullBody)
 					target = make([]byte, readLength)
 					start = 5
-					mockHandler.expect(http.MethodGet, expectUrl, rangeHead(int(start), int(start)+readLength))
-					mockHandler.response(http.StatusPartialContent, fullBody, nil)
+					mockHTTP.expect(http.MethodGet, expectUrl, rangeHead(int(start), int(start)+readLength))
+					mockHTTP.response(http.StatusPartialContent, fullBody, nil)
 				})
 
 				It("should return an error", func() {
@@ -334,8 +342,8 @@ var _ = Describe("io", func() {
 				BeforeEach(func() {
 					start = 0
 					target = make([]byte, readSize)
-					mockHandler.expect(http.MethodGet, expectUrl, rangeHead(int(start), readSize))
-					mockHandler.response(http.StatusBadRequest, nil, nil)
+					mockHTTP.expect(http.MethodGet, expectUrl, rangeHead(int(start), readSize))
+					mockHTTP.response(http.StatusBadRequest, nil, nil)
 				})
 
 				It("should return an error", func() {
@@ -353,8 +361,8 @@ var _ = Describe("io", func() {
 				BeforeEach(func() {
 					start = 5
 					target = make([]byte, readSize)
-					mockHandler.expect(http.MethodGet, expectUrl, rangeHead(int(start), int(start)+readSize))
-					mockHandler.response(http.StatusPartialContent, fullBody[start:start+int64(readSize)], nil)
+					mockHTTP.expect(http.MethodGet, expectUrl, rangeHead(int(start), int(start)+readSize))
+					mockHTTP.response(http.StatusPartialContent, fullBody[start:start+int64(readSize)], nil)
 				})
 
 				It("should return an error", func() {
@@ -363,6 +371,115 @@ var _ = Describe("io", func() {
 
 				It("should return a zero length", func() {
 					Expect(readLen).To(Equal(readSize))
+				})
+			})
+		})
+
+		Context(".HashURL", func() {
+			var (
+				expectUrl  *url.URL
+				hashSchema uint
+				chunkSize  int64
+				fullBody   []byte
+
+				err    error
+				hashes []hash.Hash
+			)
+
+			JustBeforeEach(func() {
+				hashes, err = readAtCloser.HashURL(hashSchema, chunkSize)
+			})
+
+			BeforeEach(func() {
+				expectUrl, _ = url.Parse(server.URL() + "/foo")
+				readAtCloser.options.url = expectUrl.String()
+				fullBody = []byte("blahlahbahbl")
+				readAtCloser.contentLength = int64(len(fullBody))
+				hashSchema = sha256.Size
+			})
+
+			Context("with zero chunk size", func() {
+				var expectHash hash.Hash
+
+				BeforeEach(func() {
+					expectHash = sha256.New()
+					expectHash.Write(fullBody)
+					chunkSize = 0
+					mockHTTP.expect(http.MethodGet, expectUrl, rangeHead(0, len(fullBody)))
+					mockHTTP.response(http.StatusPartialContent, fullBody, nil)
+				})
+
+				It("should not error", func() {
+					Expect(err).ToNot(HaveOccurred())
+				})
+
+				It("should return slice of one", func() {
+					Expect(len(hashes)).To(Equal(1))
+				})
+
+				It("should return the expected hash", func() {
+					Expect(hashes[0].Sum(nil)).To(Equal(expectHash.Sum(nil)))
+				})
+			})
+
+			Context("with a chunk size greater than the content", func() {
+				var expectHash hash.Hash
+
+				BeforeEach(func() {
+					expectHash = sha256.New()
+					expectHash.Write(fullBody)
+					chunkSize = int64(len(fullBody) + 1)
+					mockHTTP.expect(http.MethodGet, expectUrl, rangeHead(0, len(fullBody)))
+					mockHTTP.response(http.StatusPartialContent, fullBody, nil)
+				})
+
+				It("should not error", func() {
+					Expect(err).ToNot(HaveOccurred())
+				})
+
+				It("should return slice of one", func() {
+					Expect(len(hashes)).To(Equal(1))
+				})
+
+				It("should return the expected hash", func() {
+					Expect(hashes[0].Sum(nil)).To(Equal(expectHash.Sum(nil)))
+				})
+			})
+
+			Context("with a chunk size less than the content", func() {
+				var (
+					expectHashes []hash.Hash
+				)
+
+				BeforeEach(func() {
+					expectHashes = make([]hash.Hash, 3)
+
+					for i, str := range []string{"blah", "lahb", "ahbl"} {
+						expectHashes[i] = sha256.New()
+						expectHashes[i].Write([]byte(str))
+					}
+
+					chunkSize = int64(4)
+					mockHTTP.expect(http.MethodGet, expectUrl, rangeHead(0, 4)).
+						response(http.StatusPartialContent, fullBody[0:chunkSize], nil).
+						expect(http.MethodGet, expectUrl, rangeHead(4, 8)).
+						response(http.StatusPartialContent, fullBody[chunkSize:chunkSize*2], nil).
+						expect(http.MethodGet, expectUrl, rangeHead(8, 12)).
+						response(http.StatusPartialContent, fullBody[chunkSize*2:chunkSize*3], nil)
+				})
+
+				It("should not error", func() {
+					Expect(err).ToNot(HaveOccurred())
+				})
+
+				It("should return the expected count of hashes", func() {
+					Expect(len(hashes)).To(Equal(3))
+				})
+
+				It("should return the expected hashes", func() {
+					Expect(hashes[0].Sum(nil)).To(Equal(expectHashes[0].Sum(nil)))
+					Expect(hashes[1].Sum(nil)).To(Equal(expectHashes[1].Sum(nil)))
+					Expect(hashes[2].Sum(nil)).To(Equal(expectHashes[2].Sum(nil)))
 				})
 			})
 		})
