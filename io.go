@@ -186,6 +186,7 @@ func (o *Options) hashURL(hashSize uint) (hash.Hash, error) {
 }
 
 // HashURL takes the hash scheme as a uint (either sha256.Size or md5.Size) and the chunk size, to chunk the hashing into, and returns the hashed URL body in the supplied scheme as a slice of hash.Hash.
+// When the chunk size is < the content length the URL will be read, in parallel, to create the `hash.Hash` for each part of the file of `chunk` size.
 // Setting the chunk size to 0 is translated to "do not chunk" and will hash the content as one.
 func (r *ReadAtCloser) HashURL(scheme uint, chunk int64) ([]hash.Hash, error) {
 	if chunk <= 0 {
