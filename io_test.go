@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sync"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -255,16 +256,28 @@ var _ = Describe("io", func() {
 		var (
 			options      *Options
 			readAtCloser *ReadAtCloser
+			ctx          context.Context
+			cancel       context.CancelFunc
 		)
 
 		BeforeEach(func() {
 			server = ghttp.NewServer()
 			mockHTTP = newHTTPMock(server)
 
+			ctx, cancel = context.WithCancel(context.Background())
 			options = &Options{
 				client: &http.Client{},
 			}
-			readAtCloser = &ReadAtCloser{options: options}
+
+			readAtCloser = &ReadAtCloser{
+				ctx:               ctx,
+				cancel:            cancel,
+				concurrentReaders: make(chan struct{}, MaxConcurrentReaders),
+				options:           options,
+				readerWG:          &sync.WaitGroup{},
+				mutex:             &sync.Mutex{},
+				readers:           make(map[string]*readAtCloseRead),
+			}
 		})
 
 		AfterEach(func() {
