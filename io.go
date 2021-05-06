@@ -275,6 +275,18 @@ func (r *ReadAtCloser) Etag() string {
 	return r.etag
 }
 
+func (r *ReadAtCloser) ChunkSize() int64 {
+    r.mutex.Lock()
+    defer r.mutex.Unlock()
+    return r.options.hashChunkSize
+}
+
+func (r *ReadAtCloser) URL() string {
+    r.mutex.Lock()
+    defer r.mutex.Unlock()
+    return r.options.url
+}
+
 // ReadAt satisfies the io.ReaderAt interface. It requires the ReadAtCloser be previously configured.
 func (r *ReadAtCloser) ReadAt(b []byte, start int64) (n int, err error) {
 	end := start + int64(len(b))
