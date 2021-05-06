@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sync"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -255,16 +256,28 @@ var _ = Describe("io", func() {
 		var (
 			options      *Options
 			readAtCloser *ReadAtCloser
+			ctx          context.Context
+			cancel       context.CancelFunc
 		)
 
 		BeforeEach(func() {
 			server = ghttp.NewServer()
 			mockHTTP = newHTTPMock(server)
 
+			ctx, cancel = context.WithCancel(context.Background())
 			options = &Options{
 				client: &http.Client{},
 			}
-			readAtCloser = &ReadAtCloser{options: options}
+
+			readAtCloser = &ReadAtCloser{
+				ctx:               ctx,
+				cancel:            cancel,
+				concurrentReaders: make(chan struct{}, MaxConcurrentReaders),
+				options:           options,
+				readerWG:          &sync.WaitGroup{},
+				mutex:             &sync.Mutex{},
+				readers:           make(map[string]*readAtCloseRead),
+			}
 		})
 
 		AfterEach(func() {
@@ -387,7 +400,7 @@ var _ = Describe("io", func() {
 			)
 
 			JustBeforeEach(func() {
-				hashes, err = readAtCloser.HashURL(hashSchema, chunkSize)
+				hashes, err = readAtCloser.HashURL(hashSchema)
 			})
 
 			BeforeEach(func() {
@@ -395,6 +408,7 @@ var _ = Describe("io", func() {
 				readAtCloser.options.url = expectUrl.String()
 				fullBody = []byte("blahlahbahbl")
 				readAtCloser.contentLength = int64(len(fullBody))
+				readAtCloser.options.hashChunkSize = chunkSize
 				hashSchema = sha256.Size
 			})
 
@@ -404,7 +418,7 @@ var _ = Describe("io", func() {
 				BeforeEach(func() {
 					expectHash = sha256.New()
 					expectHash.Write(fullBody)
-					chunkSize = 0
+					readAtCloser.options.hashChunkSize = 0
 					mockHTTP.expect(http.MethodGet, expectUrl, rangeHead(0, len(fullBody)))
 					mockHTTP.response(http.StatusPartialContent, fullBody, nil)
 				})
@@ -428,7 +442,7 @@ var _ = Describe("io", func() {
 				BeforeEach(func() {
 					expectHash = sha256.New()
 					expectHash.Write(fullBody)
-					chunkSize = int64(len(fullBody) + 1)
+					readAtCloser.options.hashChunkSize = int64(len(fullBody) + 1)
 					mockHTTP.expect(http.MethodGet, expectUrl, rangeHead(0, len(fullBody)))
 					mockHTTP.response(http.StatusPartialContent, fullBody, nil)
 				})
@@ -460,6 +474,8 @@ var _ = Describe("io", func() {
 					}
 
 					chunkSize = int64(4)
+					readAtCloser.options.hashChunkSize = chunkSize
+
 					mockHTTP.expect(http.MethodGet, expectUrl, rangeHead(0, 4)).
 						response(http.StatusPartialContent, fullBody[0:chunkSize], nil).
 						expect(http.MethodGet, expectUrl, rangeHead(4, 8)).
@@ -477,9 +493,9 @@ var _ = Describe("io", func() {
 				})
 
 				It("should return the expected hashes", func() {
-					Expect(hashes[0].Sum(nil)).To(Equal(expectHashes[0].Sum(nil)))
-					Expect(hashes[1].Sum(nil)).To(Equal(expectHashes[1].Sum(nil)))
-					Expect(hashes[2].Sum(nil)).To(Equal(expectHashes[2].Sum(nil)))
+					Expect(hashes[0].Sum(nil)).To(Equal(expectHashes[0].Sum(nil)), "first hash")
+					Expect(hashes[1].Sum(nil)).To(Equal(expectHashes[1].Sum(nil)), "second hash")
+					Expect(hashes[2].Sum(nil)).To(Equal(expectHashes[2].Sum(nil)), "third hash")
 				})
 			})
 		})
