@@ -242,6 +242,7 @@ func (o *Options) headURL(expectHeaders map[string]string) (int64, string, error
 
 	for k, v := range expectHeaders {
 		if sent := head.Header.Get(k); sent != v {
+			fmt.Printf("GOT HEADER ERROR MATCHING %s (%s)\n", k, v)
 			return 0, "", headerErrs[k]
 		}
 	}
@@ -366,15 +367,15 @@ func (r *ReadAtCloser) Etag() string {
 }
 
 func (r *ReadAtCloser) ChunkSize() int64 {
-    r.mutex.Lock()
-    defer r.mutex.Unlock()
-    return r.options.hashChunkSize
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+	return r.options.hashChunkSize
 }
 
 func (r *ReadAtCloser) URL() string {
-    r.mutex.Lock()
-    defer r.mutex.Unlock()
-    return r.options.url
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+	return r.options.url
 }
 
 // ReadAt satisfies the io.ReaderAt interface. It requires the ReadAtCloser be previously configured.
