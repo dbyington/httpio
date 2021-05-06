@@ -55,6 +55,7 @@ const ReadSizeLimit = 32768
 // Options contains the parts to create and use a ReadCloser or ReadAtCloser
 type Options struct {
 	client               *http.Client
+	hashChunkSize        int64
 	expectHeaders        map[string]string
 	maxConcurrentReaders int64
 	url                  string
@@ -200,6 +201,13 @@ func WithExpectHeaders(e map[string]string) Option {
 	}
 }
 
+// WithHashChunkSize is an Option func to specify the size to chunk content at when hashing the content.
+func WithHashChunkSize(s int64) Option {
+	return func(o *Options) {
+		o.hashChunkSize = s
+	}
+}
+
 func (o *Options) ensureClient() {
 	if o.client == nil {
 		o.client = new(http.Client)
@@ -268,10 +276,11 @@ func (o *Options) hashURL(hashSize uint) (hash.Hash, error) {
 // When the chunk size is less than the length of the content, the URL will be read with multiple, concurrent range reads to create the slice of hash.Hash.
 // Specifying a chunkSize <= 0 is translated to "do not chunk" and the entire content will be hashed as one chunk.
 // The size and capacity of the returned slice of hash.Hash is equal to the number of chunks calculated based on the content length divided by the chunkSize, or 1 if chunkSize is equal to, or less than 0.
-func (r *ReadAtCloser) HashURL(scheme uint, chunkSize int64) ([]hash.Hash, error) {
-    r.mutex.Lock()
-    cl := r.contentLength
-    r.mutex.Unlock()
+func (r *ReadAtCloser) HashURL(scheme uint) ([]hash.Hash, error) {
+	r.mutex.Lock()
+	cl := r.contentLength
+	chunkSize := r.options.hashChunkSize
+	r.mutex.Unlock()
 
 	if chunkSize <= 0 {
 		chunkSize = cl
@@ -345,15 +354,15 @@ func checkErrSlice(es []error) (err error) {
 
 // Length returns the reported ContentLength of the URL body.
 func (r *ReadAtCloser) Length() int64 {
-    r.mutex.Lock()
-    defer r.mutex.Unlock()
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
 	return r.contentLength
 }
 
 // Etag returns the last read Etag from the URL being operated on by the configured ReadAtCloser.
 func (r *ReadAtCloser) Etag() string {
-    r.mutex.Lock()
-    defer r.mutex.Unlock()
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
 	return r.etag
 }
 
