@@ -44,6 +44,14 @@ type RequestError struct {
 	Url        string
 }
 
+func getHeaderErr(h string) error {
+	e, ok := headerErrs[h]
+	if !ok {
+		return fmt.Errorf("retrieving header '%s'", h)
+	}
+	return e
+}
+
 // Error returns the string of a RequestError.
 func (r RequestError) Error() string {
 	return fmt.Sprintf("Error requesting %s, received code: %s", r.Url, r.StatusCode)
@@ -242,8 +250,7 @@ func (o *Options) headURL(expectHeaders map[string]string) (int64, string, error
 
 	for k, v := range expectHeaders {
 		if sent := head.Header.Get(k); sent != v {
-			fmt.Printf("GOT HEADER ERROR MATCHING %s (%s)\n", k, v)
-			return 0, "", headerErrs[k]
+			return 0, "", getHeaderErr(k)
 		}
 	}
 
