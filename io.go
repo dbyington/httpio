@@ -112,7 +112,7 @@ type ReadAtCloser struct {
 	cancel            context.CancelFunc
 	readerWG          *sync.WaitGroup
 	concurrentReaders chan struct{}
-	mutex             *sync.Mutex
+	mutex             sync.Mutex
 	readers           map[string]*readAtCloseRead
 }
 
@@ -166,7 +166,6 @@ func NewReadAtCloser(opts ...Option) (r *ReadAtCloser, err error) {
 		options:           o,
 		ctx:               ctx,
 		cancel:            cancel,
-		mutex:             &sync.Mutex{},
 		concurrentReaders: make(chan struct{}, maxReaders),
 		readerWG:          &sync.WaitGroup{},
 		readers:           make(map[string]*readAtCloseRead),
