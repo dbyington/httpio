@@ -275,7 +275,7 @@ var _ = Describe("io", func() {
 				concurrentReaders: make(chan struct{}, MaxConcurrentReaders),
 				options:           options,
 				readerWG:          &sync.WaitGroup{},
-				mutex:             &sync.Mutex{},
+				mutex:             sync.Mutex{},
 				readers:           make(map[string]*readAtCloseRead),
 			}
 		})

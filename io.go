@@ -284,6 +284,7 @@ func (o *Options) hashURL(hashSize uint) (hash.Hash, error) {
 // Specifying a chunkSize <= 0 is translated to "do not chunk" and the entire content will be hashed as one chunk.
 // The size and capacity of the returned slice of hash.Hash is equal to the number of chunks calculated based on the content length divided by the chunkSize, or 1 if chunkSize is equal to, or less than 0.
 func (r *ReadAtCloser) HashURL(scheme uint) ([]hash.Hash, error) {
+	// Quickly copy these out and release the lock.
 	r.mutex.Lock()
 	cl := r.contentLength
 	chunkSize := r.options.hashChunkSize
