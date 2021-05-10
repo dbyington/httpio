@@ -44,6 +44,14 @@ type RequestError struct {
 	Url        string
 }
 
+func getHeaderErr(h string) error {
+	e, ok := headerErrs[h]
+	if !ok {
+		return fmt.Errorf("retrieving header '%s'", h)
+	}
+	return e
+}
+
 // Error returns the string of a RequestError.
 func (r RequestError) Error() string {
 	return fmt.Sprintf("Error requesting %s, received code: %s", r.Url, r.StatusCode)
@@ -112,7 +120,7 @@ type ReadAtCloser struct {
 	cancel            context.CancelFunc
 	readerWG          *sync.WaitGroup
 	concurrentReaders chan struct{}
-	mutex             *sync.Mutex
+	mutex             sync.Mutex
 	readers           map[string]*readAtCloseRead
 }
 
@@ -166,7 +174,6 @@ func NewReadAtCloser(opts ...Option) (r *ReadAtCloser, err error) {
 		options:           o,
 		ctx:               ctx,
 		cancel:            cancel,
-		mutex:             &sync.Mutex{},
 		concurrentReaders: make(chan struct{}, maxReaders),
 		readerWG:          &sync.WaitGroup{},
 		readers:           make(map[string]*readAtCloseRead),
@@ -243,7 +250,7 @@ func (o *Options) headURL(expectHeaders map[string]string) (int64, string, error
 
 	for k, v := range expectHeaders {
 		if sent := head.Header.Get(k); sent != v {
-			return 0, "", headerErrs[k]
+			return 0, "", getHeaderErr(k)
 		}
 	}
 
@@ -277,6 +284,7 @@ func (o *Options) hashURL(hashSize uint) (hash.Hash, error) {
 // Specifying a chunkSize <= 0 is translated to "do not chunk" and the entire content will be hashed as one chunk.
 // The size and capacity of the returned slice of hash.Hash is equal to the number of chunks calculated based on the content length divided by the chunkSize, or 1 if chunkSize is equal to, or less than 0.
 func (r *ReadAtCloser) HashURL(scheme uint) ([]hash.Hash, error) {
+	// Quickly copy these out and release the lock.
 	r.mutex.Lock()
 	cl := r.contentLength
 	chunkSize := r.options.hashChunkSize
@@ -364,6 +372,18 @@ func (r *ReadAtCloser) Etag() string {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 	return r.etag
+}
+
+func (r *ReadAtCloser) ChunkSize() int64 {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+	return r.options.hashChunkSize
+}
+
+func (r *ReadAtCloser) URL() string {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+	return r.options.url
 }
 
 // ReadAt satisfies the io.ReaderAt interface. It requires the ReadAtCloser be previously configured.
