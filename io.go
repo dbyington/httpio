@@ -59,7 +59,11 @@ func (r RequestError) Error() string {
 
 // HTTPStatus returns the http code from the RequestError.
 func (r RequestError) HTTPStatus() (int, bool) {
-    return r.StatusCode, false
+    if r.StatusCode < 200 {
+        return 0, false
+    }
+
+    return r.StatusCode, true
 }
 
 // ReadSizeLimit is the maximum size buffer chunk to operate on.
