@@ -57,6 +57,11 @@ func (r RequestError) Error() string {
 	return fmt.Sprintf("Error requesting %s, received code: %d", r.Url, r.StatusCode)
 }
 
+// HTTPStatus returns the http code from the RequestError.
+func (r RequestError) HTTPStatus() (int, bool) {
+    return r.StatusCode, false
+}
+
 // ReadSizeLimit is the maximum size buffer chunk to operate on.
 const ReadSizeLimit = 32768
 
