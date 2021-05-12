@@ -63,12 +63,33 @@ var _ = Describe("io", func() {
 				BeforeEach(func() {
 					options.url = expectUrl.String()
 					mockHTTP.expect(http.MethodHead, expectUrl, http.Header{}).
-						response(http.StatusBadRequest, nil, nil)
+						response(http.StatusOK, nil, nil)
 
 				})
 
 				It("should return the error", func() {
 					Ω(err).To(MatchError("range reads not supported"))
+				})
+
+				It("should return a zero length", func() {
+					Ω(l).To(BeZero())
+				})
+
+				It("should return an empty etag", func() {
+					Ω(etag).To(BeEmpty())
+				})
+			})
+
+			Context("when the file is not found", func() {
+				BeforeEach(func() {
+					options.url = expectUrl.String()
+					mockHTTP.expect(http.MethodHead, expectUrl, http.Header{}).
+						response(http.StatusNotFound, nil, nil)
+
+				})
+
+				It("should return the error", func() {
+					Ω(err).To(Equal(RequestError{StatusCode: http.StatusNotFound, Url: expectUrl.String()}))
 				})
 
 				It("should return a zero length", func() {
@@ -90,7 +111,7 @@ var _ = Describe("io", func() {
 						"accept-ranges":  {"bytes"},
 						"content-length": {expectLenString},
 					}
-					mockHTTP.response(http.StatusBadRequest, nil, h)
+					mockHTTP.response(http.StatusOK, nil, h)
 				})
 
 				It("should not error", func() {
@@ -233,12 +254,12 @@ var _ = Describe("io", func() {
 			})
 
 			Context("with a client request error", func() {
-				var expectErr string
+				var expectErr error
 
 				BeforeEach(func() {
 					mockHTTP.expect(http.MethodGet, expectUrl, http.Header{"Accept-Encoding": []string{"gzip"}})
 					mockHTTP.response(http.StatusBadRequest, nil, nil)
-					expectErr = fmt.Sprintf("Error requesting %s, received code: 400 Bad Request", expectUrl.String())
+					expectErr = RequestError{StatusCode: http.StatusBadRequest, Url: expectUrl.String()}
 				})
 
 				It("should return an error", func() {

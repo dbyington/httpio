@@ -40,7 +40,7 @@ const MaxConcurrentReaders = 5
 
 // RequestError fulfills the error type for reporting more specific errors with http requests.
 type RequestError struct {
-	StatusCode string
+	StatusCode int
 	Url        string
 }
 
@@ -54,7 +54,7 @@ func getHeaderErr(h string) error {
 
 // Error returns the string of a RequestError.
 func (r RequestError) Error() string {
-	return fmt.Sprintf("Error requesting %s, received code: %s", r.Url, r.StatusCode)
+	return fmt.Sprintf("Error requesting %s, received code: %d", r.Url, r.StatusCode)
 }
 
 // ReadSizeLimit is the maximum size buffer chunk to operate on.
@@ -244,6 +244,10 @@ func (o *Options) headURL(expectHeaders map[string]string) (int64, string, error
 		return 0, "", err
 	}
 
+	if head.StatusCode != http.StatusOK {
+		return 0, "", RequestError{StatusCode: head.StatusCode, Url: o.url}
+	}
+
 	if head.Header.Get("accept-ranges") != "bytes" {
 		return 0, "", ErrRangeReadNotSupported
 	}
@@ -266,7 +270,7 @@ func (o *Options) hashURL(hashSize uint) (hash.Hash, error) {
 	}
 
 	if res.StatusCode < 200 || res.StatusCode > 399 {
-		return nil, RequestError{StatusCode: res.Status, Url: o.url}
+		return nil, RequestError{StatusCode: res.StatusCode, Url: o.url}
 	}
 
 	defer res.Body.Close()
