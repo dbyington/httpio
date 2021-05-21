@@ -339,8 +339,9 @@ func (r *ReadAtCloser) HashURL(scheme uint) ([]hash.Hash, error) {
 		wg.Add(1)
 		go func(w *sync.WaitGroup, idx int64, size int64, rac *ReadAtCloser) {
 			defer w.Done()
+			fmt.Printf("reading hash chunk with size: %d, starting at %d\n", size, size*idx)
 			b := make([]byte, size)
-			if _, err := rac.ReadAt(b, chunkSize*idx); err != nil {
+			if _, err := rac.ReadAt(b, size*idx); err != nil {
 				hashErrs[idx] = err
 				if err != io.ErrUnexpectedEOF {
 					return
