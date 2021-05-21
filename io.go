@@ -331,19 +331,23 @@ func (r *ReadAtCloser) HashURL(scheme uint) ([]hash.Hash, error) {
 	wg := sync.WaitGroup{}
 
 	for i := int64(0); i < chunks; i++ {
+		remaining := cl - (i * chunkSize)
+		if chunkSize > remaining {
+			chunkSize = remaining
+		}
+
 		wg.Add(1)
 		go func(w *sync.WaitGroup, idx int64, size int64, rac *ReadAtCloser) {
 			defer w.Done()
 			b := make([]byte, size)
-			readLength, err := rac.ReadAt(b, size*idx)
-			if err != nil {
+			if _, err := rac.ReadAt(b, size*idx); err != nil {
 				hashErrs[idx] = err
 				if err != io.ErrUnexpectedEOF {
 					return
 				}
 			}
 
-			reader := bytes.NewReader(b[:readLength])
+			reader := bytes.NewReader(b[:])
 			h, err := hasher(reader)
 			if err != nil {
 				hashErrs[idx] = err
@@ -427,27 +431,21 @@ func (r *ReadAtCloser) ReadAt(b []byte, start int64) (n int, err error) {
 	}
 
 	bt := make([]byte, len(b))
-	readLength, err := io.ReadFull(res.Body, bt)
-	if err != nil {
-		if err == io.ErrUnexpectedEOF {
-			return 0, ErrRangeReadNotSatisfied
-		}
-		return 0, err
-	}
+	bt, err = ioutil.ReadAll(res.Body)
 
 	copy(b, bt)
 
-	// r.mutex.Lock()
-	// defer r.mutex.Unlock()
-	// if r.contentLength < end {
-	// 	return int(res.ContentLength - start), io.ErrUnexpectedEOF
-	// }
-	//
-	// l := int64(len(b))
-	// if l > res.ContentLength {
-	// 	l = res.ContentLength
-	// }
-	return readLength, nil
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+	if r.contentLength < end {
+		return int(res.ContentLength - start), io.ErrUnexpectedEOF
+	}
+
+	l := int64(len(b))
+	if l > res.ContentLength {
+		l = res.ContentLength
+	}
+	return int(l), nil
 }
 
 // Close cancels the client context and closes any idle connections.
