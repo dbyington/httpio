@@ -335,14 +335,15 @@ func (r *ReadAtCloser) HashURL(scheme uint) ([]hash.Hash, error) {
 		go func(w *sync.WaitGroup, idx int64, size int64, rac *ReadAtCloser) {
 			defer w.Done()
 			b := make([]byte, size)
-			if _, err := rac.ReadAt(b, size*idx); err != nil {
+			readSize, err := rac.ReadAt(b, size*idx)
+			if err != nil {
 				hashErrs[idx] = err
 				if err != io.ErrUnexpectedEOF {
 					return
 				}
 			}
 
-			reader := bytes.NewReader(b[:])
+			reader := bytes.NewReader(b[:readSize])
 			h, err := hasher(reader)
 			if err != nil {
 				hashErrs[idx] = err
