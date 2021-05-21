@@ -331,17 +331,19 @@ func (r *ReadAtCloser) HashURL(scheme uint) ([]hash.Hash, error) {
 	wg := sync.WaitGroup{}
 
 	for i := int64(0); i < chunks; i++ {
-		remaining := cl - (i * chunkSize)
-		if chunkSize > remaining {
-			chunkSize = remaining
+		remaining := chunkSize
+		if remaining > cl-(i*chunkSize) {
+			remaining = cl - (i * chunkSize)
 		}
 
+		start := chunkSize * i
+
 		wg.Add(1)
-		go func(w *sync.WaitGroup, idx int64, size int64, rac *ReadAtCloser) {
+		go func(w *sync.WaitGroup, idx int64, start, size int64, rac *ReadAtCloser) {
 			defer w.Done()
-			fmt.Printf("reading hash chunk with size: %d, starting at %d\n", size, size*idx)
+			fmt.Printf("reading hash chunk with size: %d, starting at %d\n", size, start)
 			b := make([]byte, size)
-			if _, err := rac.ReadAt(b, size*idx); err != nil {
+			if _, err := rac.ReadAt(b, start); err != nil {
 				hashErrs[idx] = err
 				if err != io.ErrUnexpectedEOF {
 					return
@@ -356,7 +358,7 @@ func (r *ReadAtCloser) HashURL(scheme uint) ([]hash.Hash, error) {
 			}
 
 			hashes[idx] = h
-		}(&wg, i, chunkSize, r)
+		}(&wg, i, start, remaining, r)
 	}
 
 	wg.Wait()
