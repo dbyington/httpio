@@ -6,14 +6,18 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"net/url"
+	"os"
 	"sync"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/ghttp"
 )
+
+const testDataDir = `./testdata`
 
 var _ = Describe("io", func() {
 	var (
@@ -418,8 +422,22 @@ var _ = Describe("io", func() {
 
 				err    error
 				hashes []hash.Hash
-			)
 
+				foe            error
+				fullFile       *os.File
+				fullFileName   = "/random.file"
+				split10KHashes = []string{
+					`cdd10328cfc79888d777d985600a2ae5e7d56ca3c775277f44cef8df2d08575b`,
+					`6c9d7e7343c6d565f68bd9dcb197446a4df2aa5930834051e43e27dedab07938`,
+					`9df40b5253fa05c7a487527ce83fd12cfacb9da0580c96ba1086dc6ef937a6b3`}
+
+				split5KHashes = []string{
+					`8b4a3f34b5af54bc3c0c414af025e9ba6ddb2ae79c9e5fa05374dc6c6ebff6e1`,
+					`96d31d79d90e6432021a35b893f084a2fa761a2b88ef332c3aa3dd6bcd38b5f0`,
+					`a15188beed7c98ab7c8d2037a98ccba1bcc92e7b5198b47371da02a814179e97`,
+					`1ca7e47ba82ce81dfb1ebf79a5783b03498a7727cbb582ee9f65466fa74c5a07`,
+					`9df40b5253fa05c7a487527ce83fd12cfacb9da0580c96ba1086dc6ef937a6b3`}
+			)
 			JustBeforeEach(func() {
 				hashes, err = readAtCloser.HashURL(hashSchema)
 			})
@@ -427,10 +445,16 @@ var _ = Describe("io", func() {
 			BeforeEach(func() {
 				expectUrl, _ = url.Parse(server.URL() + "/foo")
 				readAtCloser.options.url = expectUrl.String()
-				fullBody = []byte("blahlahbahbl")
+
+				fullFile, foe = os.Open(testDataDir + fullFileName)
+				Expect(foe).ToNot(HaveOccurred())
+				fullBody, foe = ioutil.ReadAll(fullFile)
+				Expect(foe).ToNot(HaveOccurred())
+
 				readAtCloser.contentLength = int64(len(fullBody))
 				readAtCloser.options.hashChunkSize = chunkSize
 				hashSchema = sha256.Size
+
 			})
 
 			Context("with zero chunk size", func() {
@@ -482,42 +506,68 @@ var _ = Describe("io", func() {
 			})
 
 			Context("with a chunk size less than the content", func() {
-				var (
-					expectHashes []hash.Hash
-				)
+				Context("with an even split of the content into chunks", func() {
+					BeforeEach(func() {
+						chunkSize = 5 * 1 << 10
+						readAtCloser.options.hashChunkSize = chunkSize
 
-				BeforeEach(func() {
-					expectHashes = make([]hash.Hash, 3)
+						for i := range split5KHashes {
+							start := i * int(chunkSize)
+							end := start + int(chunkSize)
+							mockHTTP.expect(http.MethodGet, expectUrl, rangeHead(start, end))
+							mockHTTP.response(http.StatusPartialContent, fullBody[start:end], nil)
+						}
+					})
 
-					for i, str := range []string{"blah", "lahb", "ahbl"} {
-						expectHashes[i] = sha256.New()
-						expectHashes[i].Write([]byte(str))
-					}
+					It("should not error", func() {
+						Expect(err).ToNot(HaveOccurred())
+					})
 
-					chunkSize = int64(4)
-					readAtCloser.options.hashChunkSize = chunkSize
+					It("should return the expected count of hashes", func() {
+						Expect(len(hashes)).To(Equal(len(split5KHashes)))
+					})
 
-					mockHTTP.expect(http.MethodGet, expectUrl, rangeHead(0, 4)).
-						response(http.StatusPartialContent, fullBody[0:chunkSize], nil).
-						expect(http.MethodGet, expectUrl, rangeHead(4, 8)).
-						response(http.StatusPartialContent, fullBody[chunkSize:chunkSize*2], nil).
-						expect(http.MethodGet, expectUrl, rangeHead(8, 12)).
-						response(http.StatusPartialContent, fullBody[chunkSize*2:chunkSize*3], nil)
+					It("should return the expected hashes", func() {
+						for i := range hashes {
+							Expect(fmt.Sprintf("%x", hashes[i].Sum(nil))).To(Equal(split5KHashes[i]))
+						}
+					})
 				})
 
-				It("should not error", func() {
-					Expect(err).ToNot(HaveOccurred())
+				Context("with an uneven split of the content into chunks", func() {
+					BeforeEach(func() {
+						chunkSize = 10 * 1 << 10
+						readAtCloser.options.hashChunkSize = chunkSize
+
+						for i := range split10KHashes {
+							start := i * int(chunkSize)
+							end := start + int(chunkSize)
+
+							// We expect the last chunk to be over the end and the expectation is that we'll only read to the end, since we know the length already.
+							if end > len(fullBody) {
+								end = len(fullBody)
+							}
+
+							mockHTTP.expect(http.MethodGet, expectUrl, rangeHead(start, end))
+							mockHTTP.response(http.StatusPartialContent, fullBody[start:end], nil)
+						}
+					})
+
+					It("should not error", func() {
+						Expect(err).ToNot(HaveOccurred())
+					})
+
+					It("should return the expected count of hashes", func() {
+						Expect(len(hashes)).To(Equal(len(split10KHashes)))
+					})
+
+					It("should return the expected hashes", func() {
+						for i := range hashes {
+							Expect(fmt.Sprintf("%x", hashes[i].Sum(nil))).To(Equal(split10KHashes[i]))
+						}
+					})
 				})
 
-				It("should return the expected count of hashes", func() {
-					Expect(len(hashes)).To(Equal(3))
-				})
-
-				It("should return the expected hashes", func() {
-					Expect(hashes[0].Sum(nil)).To(Equal(expectHashes[0].Sum(nil)), "first hash")
-					Expect(hashes[1].Sum(nil)).To(Equal(expectHashes[1].Sum(nil)), "second hash")
-					Expect(hashes[2].Sum(nil)).To(Equal(expectHashes[2].Sum(nil)), "third hash")
-				})
 			})
 		})
 	})
