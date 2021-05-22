@@ -59,11 +59,11 @@ func (r RequestError) Error() string {
 
 // HTTPStatus returns the http code from the RequestError.
 func (r RequestError) HTTPStatus() (int, bool) {
-    if r.StatusCode < 200 {
-        return 0, false
-    }
+	if r.StatusCode < 200 {
+		return 0, false
+	}
 
-    return r.StatusCode, true
+	return r.StatusCode, true
 }
 
 // ReadSizeLimit is the maximum size buffer chunk to operate on.
@@ -331,11 +331,18 @@ func (r *ReadAtCloser) HashURL(scheme uint) ([]hash.Hash, error) {
 	wg := sync.WaitGroup{}
 
 	for i := int64(0); i < chunks; i++ {
+		remaining := chunkSize
+		if remaining > cl-(i*chunkSize) {
+			remaining = cl - (i * chunkSize)
+		}
+
+		start := chunkSize * i
+
 		wg.Add(1)
-		go func(w *sync.WaitGroup, idx int64, size int64, rac *ReadAtCloser) {
+		go func(w *sync.WaitGroup, idx int64, start, size int64, rac *ReadAtCloser) {
 			defer w.Done()
 			b := make([]byte, size)
-			if _, err := rac.ReadAt(b, size*idx); err != nil {
+			if _, err := rac.ReadAt(b, start); err != nil {
 				hashErrs[idx] = err
 				if err != io.ErrUnexpectedEOF {
 					return
@@ -350,7 +357,7 @@ func (r *ReadAtCloser) HashURL(scheme uint) ([]hash.Hash, error) {
 			}
 
 			hashes[idx] = h
-		}(&wg, i, chunkSize, r)
+		}(&wg, i, start, remaining, r)
 	}
 
 	wg.Wait()
