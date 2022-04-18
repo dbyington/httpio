@@ -153,7 +153,7 @@ func (r *ReadAtCloser) finishReader(id string) {
 }
 
 // NewReadAtCloser validates the options provided and returns a new a *ReadAtCloser after validating the URL. The URL validation includes basic scheme and hostnane checks.
-func NewReadAtCloser(opts ...Option) (r *ReadAtCloser, err error) {
+func NewReadAtCloser(ctx context.Context, opts ...Option) (r *ReadAtCloser, err error) {
 	o := &Options{expectHeaders: make(map[string]string)}
 	for _, opt := range opts {
 		opt(o)
@@ -175,7 +175,7 @@ func NewReadAtCloser(opts ...Option) (r *ReadAtCloser, err error) {
 		return nil, err
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(ctx)
 
 	return &ReadAtCloser{
 		contentLength:     contentLength,
