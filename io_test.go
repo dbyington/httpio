@@ -3,6 +3,7 @@ package httpio
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"hash"
 	"io"
@@ -569,6 +570,48 @@ var _ = Describe("io", func() {
 				})
 
 			})
+		})
+	})
+})
+
+var _ = Describe("checkErrSlice", func() {
+	var (
+		es []error
+
+		err error
+	)
+
+	JustBeforeEach(func() {
+		err = checkErrSlice(es)
+	})
+
+	Context("with no errors in slice", func() {
+		BeforeEach(func() {
+			es = make([]error, 0)
+		})
+
+		It("should not return an error", func() {
+			Expect(err).ToNot(HaveOccurred())
+		})
+	})
+
+	Context("with one error in slice", func() {
+		BeforeEach(func() {
+			es = []error{nil, errors.New("test error"), nil}
+		})
+
+		It("should return an error", func() {
+			Expect(err).To(MatchError("test error"))
+		})
+	})
+
+	Context("with multiple errors in slice", func() {
+		BeforeEach(func() {
+			es = []error{nil, errors.New("test error 2"), errors.New("test error 1"), nil}
+		})
+
+		It("should return an error", func() {
+			Expect(err).To(MatchError("test error 2: test error 1"))
 		})
 	})
 })
