@@ -72,7 +72,7 @@ const ReadSizeLimit = 32768
 // Options contains the parts to create and use a ReadCloser or ReadAtCloser
 type Options struct {
 	client               *http.Client
-	ctx 				 context.Context
+	ctx                  context.Context
 	hashChunkSize        int64
 	expectHeaders        map[string]string
 	maxConcurrentReaders int64

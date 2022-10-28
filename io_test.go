@@ -192,7 +192,7 @@ var _ = Describe("io", func() {
 		Context(".WithContext", func() {
 			var (
 				inCTX context.Context
-				o Option
+				o     Option
 			)
 
 			JustBeforeEach(func() {
