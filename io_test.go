@@ -189,6 +189,29 @@ var _ = Describe("io", func() {
 			})
 		})
 
+		Context(".WithContext", func() {
+			var (
+				inCTX context.Context
+				o     Option
+			)
+
+			JustBeforeEach(func() {
+				o = WithContext(inCTX)
+				o(testOptions)
+			})
+
+			Context("with a context", func() {
+				BeforeEach(func() {
+					inCTX = context.Background()
+					testOptions = &Options{}
+				})
+
+				It("should set the option context", func() {
+					Expect(testOptions.ctx).To(Equal(inCTX))
+				})
+			})
+		})
+
 		Context(".validateUrl", func() {
 			var (
 				u   string
