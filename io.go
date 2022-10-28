@@ -433,7 +433,7 @@ func (r *ReadAtCloser) ReadAt(b []byte, start int64) (n int, err error) {
 		return 0, err
 	}
 
-	if res.StatusCode != http.StatusPartialContent {
+	if res.StatusCode != http.StatusPartialContent && res.StatusCode != http.StatusOK {
 		return 0, ErrRangeReadNotSatisfied
 	}
 
