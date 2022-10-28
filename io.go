@@ -72,6 +72,7 @@ const ReadSizeLimit = 32768
 // Options contains the parts to create and use a ReadCloser or ReadAtCloser
 type Options struct {
 	client               *http.Client
+	ctx 				 context.Context
 	hashChunkSize        int64
 	expectHeaders        map[string]string
 	maxConcurrentReaders int64
@@ -175,7 +176,12 @@ func NewReadAtCloser(opts ...Option) (r *ReadAtCloser, err error) {
 		return nil, err
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	useCTX := context.Background()
+	if o.ctx != nil {
+		useCTX = o.ctx
+	}
+
+	ctx, cancel := context.WithCancel(useCTX)
 
 	return &ReadAtCloser{
 		contentLength:     contentLength,
@@ -193,6 +199,13 @@ func NewReadAtCloser(opts ...Option) (r *ReadAtCloser, err error) {
 func WithClient(c *http.Client) Option {
 	return func(o *Options) {
 		o.client = c
+	}
+}
+
+// WithContext allows supplying a context for the ReadAtCloser to use.
+func WithContext(ctx context.Context) Option {
+	return func(o *Options) {
+		o.ctx = ctx
 	}
 }
 
