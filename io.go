@@ -16,7 +16,9 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/dbyington/httpio/tracing"
 	"github.com/sirupsen/logrus"
 )
 
@@ -270,7 +272,14 @@ func (o *Options) ensureOptions() {
 
 func (o *Options) ensureClient() {
 	if o.client == nil {
-		o.client = new(http.Client)
+		o.client = &http.Client{
+			Timeout: time.Second * 60,
+			Transport: &http.Transport{
+				IdleConnTimeout:       time.Second * 30,
+				ResponseHeaderTimeout: time.Second * 10,
+				MaxIdleConns:          25,
+			},
+		}
 	}
 }
 
@@ -476,7 +485,7 @@ func (r *ReadAtCloser) URL() string {
 func (r *ReadAtCloser) ReadAt(b []byte, start int64) (n int, err error) {
 	end := start + int64(len(b))
 	logger := r.log.WithField("ReadAtID", randomString(5))
-	logger.Debugf("reading from %d to %d", start, end)
+	logger.Tracef("reading from %d to %d", start, end)
 
 	r.readerWG.Add(1)
 	defer r.readerWG.Done()
@@ -489,17 +498,21 @@ func (r *ReadAtCloser) ReadAt(b []byte, start int64) (n int, err error) {
 	}
 
 	requestRange := fmt.Sprintf("bytes=%d-%d", start, end)
-	logger.Infof("requesting range: '%s'", requestRange)
+	logger.Debugf("requesting range: '%s'", requestRange)
 	req.Header.Add("Range", requestRange)
+
+	tracingClient := tracing.NewClient(r.log)
+	req = tracingClient.TraceRequest(req)
 
 	res, err := reader.client.do(req)
 	if err != nil {
 		return 0, err
 	}
 
-	logger.Infof("request answered with proto %s", res.Proto)
-	logger.Infof("request answered with (%d) %s", res.StatusCode, res.Status)
+	logger.Debugf("request answered with proto %s", res.Proto)
+	logger.Debugf("request answered with (%d) %s", res.StatusCode, res.Status)
 	logHeaders(logger.WithField("method", http.MethodGet), res.Header)
+	tracingClient.LogTimers()
 
 	if res.StatusCode != http.StatusPartialContent && res.StatusCode != http.StatusOK {
 		return 0, ErrRangeReadNotSatisfied
@@ -521,10 +534,10 @@ func (r *ReadAtCloser) ReadAt(b []byte, start int64) (n int, err error) {
 
 	l := int64(len(b))
 	if l > res.ContentLength {
-		r.log.Infof("read more than expected (%d bytes), resetting to expected ContentLength: %d\n", len(b), res.ContentLength)
+		r.log.Debugf("read more than expected (%d bytes), resetting to expected ContentLength: %d\n", len(b), res.ContentLength)
 		l = res.ContentLength
 	}
-	logger.Infof("read %d bytes from body", l)
+	logger.Debugf("read %d bytes from body", l)
 	return int(l), nil
 }
 
