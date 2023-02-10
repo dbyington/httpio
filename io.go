@@ -16,6 +16,8 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+
+	"github.com/sirupsen/logrus"
 )
 
 // Possible errors
@@ -34,6 +36,8 @@ var (
 		"Content-Length": ErrHeaderContentLength,
 	}
 )
+
+const loggerKey = "logger"
 
 // MaxConcurrentReaders limits the number of concurrent reads.
 const MaxConcurrentReaders = 5
@@ -73,8 +77,9 @@ const ReadSizeLimit = 32768
 type Options struct {
 	client               *http.Client
 	ctx                  context.Context
-	hashChunkSize        int64
 	expectHeaders        map[string]string
+	hashChunkSize        int64
+	logger               *logrus.Logger
 	maxConcurrentReaders int64
 	url                  string
 }
@@ -97,6 +102,7 @@ type readAtCloseRead struct {
 	client    readClient
 	ctx       context.Context
 	cancelCTX context.CancelFunc
+	log       logrus.FieldLogger
 	id        string
 }
 
@@ -108,6 +114,7 @@ func (r *ReadAtCloser) newReader() *readAtCloseRead {
 		cancelCTX: cancel,
 		id:        randomString(),
 	}
+	reader.log = r.log.WithField("readerId", reader.id)
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 	r.readers[reader.id] = reader
@@ -128,17 +135,28 @@ type ReadAtCloser struct {
 
 	ctx               context.Context
 	cancel            context.CancelFunc
-	readerWG          *sync.WaitGroup
 	concurrentReaders chan struct{}
+	log               logrus.FieldLogger
 	mutex             sync.Mutex
 	readers           map[string]*readAtCloseRead
+	readerWG          *sync.WaitGroup
 }
 
-func (r *ReadAtCloser) do(req *http.Request) (*http.Response, error) {
+func (r *ReadAtCloser) do(req *http.Request) (resp *http.Response, err error) {
+	r.log.Infoln("attempting to get concurrent reader slot")
 	r.concurrentReaders <- struct{}{}
-	res, err := r.options.client.Do(req)
-	<-r.concurrentReaders
-	return res, err
+	r.log.Infoln("concurrent reader slot acquired, making request...")
+
+	defer func() {
+		<-r.concurrentReaders
+		status := "completed successfully"
+		if err != nil {
+			status = "failed"
+		}
+		r.log.Infof("client request %s. reader slot freed", status)
+	}()
+
+	return r.options.client.Do(req)
 }
 
 func (r *ReadAtCloser) finishReader(id string) {
@@ -146,6 +164,7 @@ func (r *ReadAtCloser) finishReader(id string) {
 	defer r.mutex.Unlock()
 	reader, ok := r.readers[id]
 	if !ok {
+		r.log.Warnf("reader %s not found", id)
 		return
 	}
 
@@ -160,7 +179,7 @@ func NewReadAtCloser(opts ...Option) (r *ReadAtCloser, err error) {
 		opt(o)
 	}
 
-	o.ensureClient()
+	o.ensureOptions()
 
 	if err := o.validateUrl(); err != nil {
 		return nil, err
@@ -184,12 +203,13 @@ func NewReadAtCloser(opts ...Option) (r *ReadAtCloser, err error) {
 	ctx, cancel := context.WithCancel(useCTX)
 
 	return &ReadAtCloser{
-		contentLength:     contentLength,
-		etag:              etag,
-		options:           o,
-		ctx:               ctx,
 		cancel:            cancel,
 		concurrentReaders: make(chan struct{}, maxReaders),
+		contentLength:     contentLength,
+		ctx:               ctx,
+		etag:              etag,
+		log:               o.logger.WithField("traceID", randomString()),
+		options:           o,
 		readerWG:          &sync.WaitGroup{},
 		readers:           make(map[string]*readAtCloseRead),
 	}, nil
@@ -206,6 +226,12 @@ func WithClient(c *http.Client) Option {
 func WithContext(ctx context.Context) Option {
 	return func(o *Options) {
 		o.ctx = ctx
+	}
+}
+
+func WithLogger(l *logrus.Logger) Option {
+	return func(o *Options) {
+		o.logger = l
 	}
 }
 
@@ -237,9 +263,21 @@ func WithHashChunkSize(s int64) Option {
 	}
 }
 
+func (o *Options) ensureOptions() {
+	o.ensureClient()
+	o.ensureLogger()
+}
+
 func (o *Options) ensureClient() {
 	if o.client == nil {
 		o.client = new(http.Client)
+	}
+}
+
+func (o *Options) ensureLogger() {
+	if o.logger == nil {
+		o.logger = logrus.New()
+		o.logger.Level = logrus.InfoLevel
 	}
 }
 
@@ -309,6 +347,7 @@ func (o *Options) hashURL(hashSize uint) (hash.Hash, error) {
 // Specifying a chunkSize <= 0 is translated to "do not chunk" and the entire content will be hashed as one chunk.
 // The size and capacity of the returned slice of hash.Hash is equal to the number of chunks calculated based on the content length divided by the chunkSize, or 1 if chunkSize is equal to, or less than 0.
 func (r *ReadAtCloser) HashURL(scheme uint) ([]hash.Hash, error) {
+	r.log.Infoln("starting hash url")
 	// Quickly copy these out and release the lock.
 	r.mutex.Lock()
 	cl := r.contentLength
@@ -342,6 +381,8 @@ func (r *ReadAtCloser) HashURL(scheme uint) ([]hash.Hash, error) {
 	hashErrs := make([]error, chunks)
 	wg := sync.WaitGroup{}
 
+	r.log.Infof("hashing %d chunks", chunks)
+
 	for i := int64(0); i < chunks; i++ {
 		// The remaining size is the smaller of the chunkSize or the chunkSize times the number of chunks already read.
 		remaining := chunkSize
@@ -358,6 +399,7 @@ func (r *ReadAtCloser) HashURL(scheme uint) ([]hash.Hash, error) {
 
 		wg.Add(1)
 		go func(w *sync.WaitGroup, idx, start, size int64, rac *ReadAtCloser) {
+			rac.log.Infof("reading chunk %d", idx)
 			defer w.Done()
 			b := make([]byte, size)
 			if _, err := rac.ReadAt(b, start); err != nil {
@@ -427,6 +469,7 @@ func (r *ReadAtCloser) URL() string {
 // ReadAt satisfies the io.ReaderAt interface. It requires the ReadAtCloser be previously configured.
 func (r *ReadAtCloser) ReadAt(b []byte, start int64) (n int, err error) {
 	end := start + int64(len(b))
+	r.log.Infof("reading from %d to %d", start, end)
 
 	r.readerWG.Add(1)
 	defer r.readerWG.Done()
@@ -439,6 +482,7 @@ func (r *ReadAtCloser) ReadAt(b []byte, start int64) (n int, err error) {
 	}
 
 	requestRange := fmt.Sprintf("bytes=%d-%d", start, end)
+	r.log.Infof("requesting range: '%s'", requestRange)
 	req.Header.Add("Range", requestRange)
 
 	res, err := reader.client.do(req)
@@ -446,6 +490,7 @@ func (r *ReadAtCloser) ReadAt(b []byte, start int64) (n int, err error) {
 		return 0, err
 	}
 
+	r.log.Infof("request answered with (%d) %s", res.StatusCode, res.Status)
 	if res.StatusCode != http.StatusPartialContent && res.StatusCode != http.StatusOK {
 		return 0, ErrRangeReadNotSatisfied
 	}
@@ -463,6 +508,7 @@ func (r *ReadAtCloser) ReadAt(b []byte, start int64) (n int, err error) {
 
 	l := int64(len(b))
 	if l > res.ContentLength {
+		r.log.Debugf("read more than expected (%d bytes), resetting to expected ContentLength: %d\n", len(b), res.ContentLength)
 		l = res.ContentLength
 	}
 	return int(l), nil

@@ -16,6 +16,7 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/ghttp"
+	"github.com/sirupsen/logrus"
 )
 
 const testDataDir = `./testdata`
@@ -314,14 +315,17 @@ var _ = Describe("io", func() {
 			mockHTTP = newHTTPMock(server)
 
 			ctx, cancel = context.WithCancel(context.Background())
+
 			options = &Options{
 				client: &http.Client{},
+				logger: newNoopLogger(),
 			}
 
 			readAtCloser = &ReadAtCloser{
 				ctx:               ctx,
 				cancel:            cancel,
 				concurrentReaders: make(chan struct{}, MaxConcurrentReaders),
+				log:               options.logger.WithField("testing", "ignored"),
 				options:           options,
 				readerWG:          &sync.WaitGroup{},
 				mutex:             sync.Mutex{},
@@ -644,4 +648,15 @@ func rangeHead(start, end int) map[string][]string {
 	return map[string][]string{
 		"Range": {r},
 	}
+}
+
+type noopWriter struct{}
+
+func newNoopLogger() *logrus.Logger {
+	noopLog := logrus.New()
+	noopLog.SetOutput(&noopWriter{})
+	return noopLog
+}
+func (*noopWriter) Write(b []byte) (int, error) {
+	return len(b), nil
 }
