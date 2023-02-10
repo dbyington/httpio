@@ -473,7 +473,8 @@ func (r *ReadAtCloser) URL() string {
 // ReadAt satisfies the io.ReaderAt interface. It requires the ReadAtCloser be previously configured.
 func (r *ReadAtCloser) ReadAt(b []byte, start int64) (n int, err error) {
 	end := start + int64(len(b))
-	r.log.Debugf("reading from %d to %d", start, end)
+	logger := r.log.WithField("ReadAtID", randomString())
+	logger.Debugf("reading from %d to %d", start, end)
 
 	r.readerWG.Add(1)
 	defer r.readerWG.Done()
@@ -486,7 +487,7 @@ func (r *ReadAtCloser) ReadAt(b []byte, start int64) (n int, err error) {
 	}
 
 	requestRange := fmt.Sprintf("bytes=%d-%d", start, end)
-	r.log.Infof("requesting range: '%s'", requestRange)
+	logger.Infof("requesting range: '%s'", requestRange)
 	req.Header.Add("Range", requestRange)
 
 	res, err := reader.client.do(req)
@@ -494,16 +495,19 @@ func (r *ReadAtCloser) ReadAt(b []byte, start int64) (n int, err error) {
 		return 0, err
 	}
 
-	r.log.Infof("request answered with proto %s", res.Proto)
-	logHeaders(r.log.WithField("method", http.MethodGet), res.Header)
+	logger.Infof("request answered with proto %s", res.Proto)
+	logger.Infof("request answered with (%d) %s", res.StatusCode, res.Status)
+	logHeaders(logger.WithField("method", http.MethodGet), res.Header)
 
-	r.log.Infof("request answered with (%d) %s", res.StatusCode, res.Status)
 	if res.StatusCode != http.StatusPartialContent && res.StatusCode != http.StatusOK {
 		return 0, ErrRangeReadNotSatisfied
 	}
 
 	bt := make([]byte, len(b))
 	bt, err = ioutil.ReadAll(res.Body)
+	if err = res.Body.Close(); err != nil {
+		r.log.Errorf("while closing request body: %s", err)
+	}
 
 	copy(b, bt)
 
@@ -518,6 +522,7 @@ func (r *ReadAtCloser) ReadAt(b []byte, start int64) (n int, err error) {
 		r.log.Infof("read more than expected (%d bytes), resetting to expected ContentLength: %d\n", len(b), res.ContentLength)
 		l = res.ContentLength
 	}
+	logger.Infof("read %d bytes from body", l)
 	return int(l), nil
 }
 
