@@ -208,7 +208,7 @@ func NewReadAtCloser(opts ...Option) (r *ReadAtCloser, err error) {
 		contentLength:     contentLength,
 		ctx:               ctx,
 		etag:              etag,
-		log:               o.logger.WithField("traceID", randomString()),
+		log:               o.logger.WithField("traceID", randomString(12)),
 		options:           o,
 		readerWG:          &sync.WaitGroup{},
 		readers:           make(map[string]*readAtCloseRead),
@@ -475,7 +475,7 @@ func (r *ReadAtCloser) URL() string {
 // ReadAt satisfies the io.ReaderAt interface. It requires the ReadAtCloser be previously configured.
 func (r *ReadAtCloser) ReadAt(b []byte, start int64) (n int, err error) {
 	end := start + int64(len(b))
-	logger := r.log.WithField("ReadAtID", randomString())
+	logger := r.log.WithField("ReadAtID", randomString(5))
 	logger.Debugf("reading from %d to %d", start, end)
 
 	r.readerWG.Add(1)
@@ -610,9 +610,14 @@ func md5SumReader(r io.Reader) (hash.Hash, error) {
 	return md5sum, nil
 }
 
-func randomString() string {
+func randomString(x ...int) string {
 	letters := []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
-	s := make([]rune, rand.Intn(25)+25)
+	size := rand.Intn(25) + 25
+	if len(x) > 0 {
+		size = x[0]
+	}
+
+	s := make([]rune, size)
 	for i := range s {
 		s[i] = letters[rand.Intn(len(letters))]
 	}
