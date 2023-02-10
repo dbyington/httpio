@@ -308,6 +308,8 @@ func (o *Options) headURL(expectHeaders map[string]string) (int64, string, error
 		return 0, "", RequestError{StatusCode: head.StatusCode, Url: o.url}
 	}
 
+	logHeaders(o.logger.WithField("method", http.MethodHead), head.Header)
+
 	if head.Header.Get("accept-ranges") != "bytes" {
 		return 0, "", ErrRangeReadNotSupported
 	}
@@ -333,6 +335,8 @@ func (o *Options) hashURL(hashSize uint) (hash.Hash, error) {
 	if res.StatusCode < 200 || res.StatusCode > 399 {
 		return nil, RequestError{StatusCode: res.StatusCode, Url: o.url}
 	}
+
+	logHeaders(o.logger.WithField("method", http.MethodGet), res.Header)
 
 	switch hashSize {
 	case sha256.Size:
@@ -384,7 +388,7 @@ func (r *ReadAtCloser) HashURL(scheme uint) ([]hash.Hash, error) {
 	r.log.Infof("hashing %d chunks", chunks)
 
 	for i := int64(0); i < chunks; i++ {
-		// The remaining size is the smaller of the chunkSize or the chunkSize times the number of chunks already read.
+		// The remaining size is the smallest of the chunkSize or the chunkSize times the number of chunks already read.
 		remaining := chunkSize
 		if remaining > cl-(i*chunkSize) {
 			remaining = cl - (i * chunkSize)
@@ -399,7 +403,7 @@ func (r *ReadAtCloser) HashURL(scheme uint) ([]hash.Hash, error) {
 
 		wg.Add(1)
 		go func(w *sync.WaitGroup, idx, start, size int64, rac *ReadAtCloser) {
-			rac.log.Infof("reading chunk %d", idx)
+			rac.log.Debugf("reading chunk %d", idx)
 			defer w.Done()
 			b := make([]byte, size)
 			if _, err := rac.ReadAt(b, start); err != nil {
@@ -469,7 +473,7 @@ func (r *ReadAtCloser) URL() string {
 // ReadAt satisfies the io.ReaderAt interface. It requires the ReadAtCloser be previously configured.
 func (r *ReadAtCloser) ReadAt(b []byte, start int64) (n int, err error) {
 	end := start + int64(len(b))
-	r.log.Infof("reading from %d to %d", start, end)
+	r.log.Debugf("reading from %d to %d", start, end)
 
 	r.readerWG.Add(1)
 	defer r.readerWG.Done()
@@ -490,6 +494,9 @@ func (r *ReadAtCloser) ReadAt(b []byte, start int64) (n int, err error) {
 		return 0, err
 	}
 
+	r.log.Infof("request answered with proto %s", res.Proto)
+	logHeaders(r.log.WithField("method", http.MethodGet), res.Header)
+
 	r.log.Infof("request answered with (%d) %s", res.StatusCode, res.Status)
 	if res.StatusCode != http.StatusPartialContent && res.StatusCode != http.StatusOK {
 		return 0, ErrRangeReadNotSatisfied
@@ -508,7 +515,7 @@ func (r *ReadAtCloser) ReadAt(b []byte, start int64) (n int, err error) {
 
 	l := int64(len(b))
 	if l > res.ContentLength {
-		r.log.Debugf("read more than expected (%d bytes), resetting to expected ContentLength: %d\n", len(b), res.ContentLength)
+		r.log.Infof("read more than expected (%d bytes), resetting to expected ContentLength: %d\n", len(b), res.ContentLength)
 		l = res.ContentLength
 	}
 	return int(l), nil
@@ -603,4 +610,11 @@ func randomString() string {
 		s[i] = letters[rand.Intn(len(letters))]
 	}
 	return string(s)
+}
+
+func logHeaders(l logrus.FieldLogger, h map[string][]string) {
+	l.Infoln("response headers")
+	for key, values := range h {
+		l.Infof("%s: %+v", key, values)
+	}
 }

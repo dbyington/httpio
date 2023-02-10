@@ -61,7 +61,10 @@ var _ = Describe("io", func() {
 			})
 
 			BeforeEach(func() {
-				options = &Options{client: &http.Client{}}
+				options = &Options{
+					client: &http.Client{},
+					logger: newNoopLogger(),
+				}
 				expectUrl, _ = url.Parse(server.URL() + "/foo")
 			})
 
@@ -147,6 +150,7 @@ var _ = Describe("io", func() {
 					c = nil
 					testOptions = &Options{
 						client: new(http.Client),
+						logger: newNoopLogger(),
 					}
 				})
 
@@ -181,7 +185,7 @@ var _ = Describe("io", func() {
 			Context("with a url string", func() {
 				BeforeEach(func() {
 					u = "somestring"
-					testOptions = &Options{}
+					testOptions = &Options{logger: newNoopLogger()}
 				})
 
 				It("should set the option client", func() {
@@ -204,7 +208,7 @@ var _ = Describe("io", func() {
 			Context("with a context", func() {
 				BeforeEach(func() {
 					inCTX = context.Background()
-					testOptions = &Options{}
+					testOptions = &Options{logger: newNoopLogger()}
 				})
 
 				It("should set the option context", func() {
@@ -226,7 +230,10 @@ var _ = Describe("io", func() {
 			Context("with a no scheme", func() {
 				BeforeEach(func() {
 					u = "google.com/q"
-					testOptions = &Options{url: u}
+					testOptions = &Options{
+						url:    u,
+						logger: newNoopLogger(),
+					}
 				})
 
 				It("should return an error", func() {
@@ -279,6 +286,7 @@ var _ = Describe("io", func() {
 				options = &Options{
 					client: &http.Client{},
 					url:    expectUrl.String(),
+					logger: newNoopLogger(),
 				}
 			})
 
