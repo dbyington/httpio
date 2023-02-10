@@ -76,7 +76,11 @@ func (t *timers) Update(timer string) {
 }
 
 func NewClient(fl logrus.FieldLogger) *Client {
-	c := &Client{logger: fl}
+	c := &Client{
+		logger: fl,
+		timers: new(timers),
+	}
+
 	c.clientTrace = &httptrace.ClientTrace{
 		GetConn:              c.GetConn,
 		GotConn:              c.GotConn,
