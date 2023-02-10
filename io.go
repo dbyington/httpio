@@ -403,7 +403,7 @@ func (r *ReadAtCloser) HashURL(scheme uint) ([]hash.Hash, error) {
 
 		wg.Add(1)
 		go func(w *sync.WaitGroup, idx, start, size int64, rac *ReadAtCloser) {
-			rac.log.Debugf("reading chunk %d", idx)
+			rac.log.Infof("reading chunk %d", idx)
 			defer w.Done()
 			b := make([]byte, size)
 			if _, err := rac.ReadAt(b, start); err != nil {
@@ -416,11 +416,13 @@ func (r *ReadAtCloser) HashURL(scheme uint) ([]hash.Hash, error) {
 			reader := bytes.NewReader(b[:])
 			h, err := hasher(reader)
 			if err != nil {
+				rac.log.Errorf("reading chunk %d: %s", idx, err)
 				hashErrs[idx] = err
 				return
 			}
 
 			hashes[idx] = h
+			rac.log.Infof("finished reading chunk %d", idx)
 		}(&wg, i, start, remaining, r)
 	}
 
