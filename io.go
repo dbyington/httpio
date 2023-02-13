@@ -145,9 +145,10 @@ type ReadAtCloser struct {
 }
 
 func (r *ReadAtCloser) do(req *http.Request) (resp *http.Response, err error) {
-	r.log.Infoln("attempting to get concurrent reader slot")
+	l := r.log.WithField("method", "do")
+	l.Traceln("attempting to get concurrent reader slot")
 	r.concurrentReaders <- struct{}{}
-	r.log.Infoln("concurrent reader slot acquired, making request...")
+	l.Traceln("concurrent reader slot acquired, making request...")
 
 	defer func() {
 		<-r.concurrentReaders
@@ -155,7 +156,7 @@ func (r *ReadAtCloser) do(req *http.Request) (resp *http.Response, err error) {
 		if err != nil {
 			status = "failed"
 		}
-		r.log.Infof("client request %s. reader slot freed", status)
+		l.Tracef("client request %s. reader slot freed", status)
 	}()
 
 	return r.options.client.Do(req)
