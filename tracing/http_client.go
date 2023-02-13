@@ -109,23 +109,24 @@ func (c *Client) TraceRequest(req *http.Request) *http.Request {
 }
 
 func (c *Client) LogTimers() {
-	c.logger.Infof("\nGetConn: %s\nGotConn: %s\nPutIdleConn: %s\nGotFirstResponseByte: %s\nGot100Continue: %s\nGot1xxResponse: %s\nDNSStart: %s\nDNSDone: %s\nConnectStart: %s\nConnectDone: %s\nTLSHandshakeStart: %s\nTLSHandshakeDone: %s\nWroteHeaderField: %s\nWroteHeaders: %s\nWait100Continue: %s\nWroteRequest: %s\n",
-		c.timers.GetConn,
-		c.timers.GotConn,
-		c.timers.PutIdleConn,
-		c.timers.GotFirstResponseByte,
-		c.timers.Got100Continue,
-		c.timers.Got1xxResponse,
-		c.timers.DNSStart,
-		c.timers.DNSDone,
-		c.timers.ConnectStart,
-		c.timers.ConnectDone,
-		c.timers.TLSHandshakeStart,
-		c.timers.TLSHandshakeDone,
-		c.timers.WroteHeaderField,
-		c.timers.WroteHeaders,
-		c.timers.Wait100Continue,
-		c.timers.WroteRequest)
+	c.logger.WithFields(logrus.Fields{
+		"GetConn":              c.timers.GetConn,
+		"GotConn":              c.timers.GotConn,
+		"PutIdleConn":          c.timers.PutIdleConn,
+		"GotFirstResponseByte": c.timers.GotFirstResponseByte,
+		"Got100Continue":       c.timers.Got100Continue,
+		"Got1xxResponse":       c.timers.Got1xxResponse,
+		"DNSStart":             c.timers.DNSStart,
+		"DNSDone":              c.timers.DNSDone,
+		"ConnectStart":         c.timers.ConnectStart,
+		"ConnectDone":          c.timers.ConnectDone,
+		"TLSHandshakeStart":    c.timers.TLSHandshakeStart,
+		"TLSHandshakeDone":     c.timers.TLSHandshakeDone,
+		"WroteHeaderField":     c.timers.WroteHeaderField,
+		"WroteHeaders":         c.timers.WroteHeaders,
+		"Wait100Continue":      c.timers.Wait100Continue,
+		"WroteRequest":         c.timers.WroteRequest,
+	}).Infof("request started at %s", c.timers.start)
 }
 
 func (c *Client) GetConn(port string) {

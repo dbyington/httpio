@@ -394,7 +394,8 @@ func (r *ReadAtCloser) HashURL(scheme uint) ([]hash.Hash, error) {
 	hashErrs := make([]error, chunks)
 	wg := sync.WaitGroup{}
 
-	r.log.Infof("hashing %d chunks", chunks)
+	defer func(t time.Time) { r.log.Debugf("completed hashing in %s", time.Since(t)) }(time.Now())
+	r.log.Debugf("hashing %d chunks", chunks)
 
 	for i := int64(0); i < chunks; i++ {
 		// The remaining size is the smallest of the chunkSize or the chunkSize times the number of chunks already read.
@@ -412,7 +413,8 @@ func (r *ReadAtCloser) HashURL(scheme uint) ([]hash.Hash, error) {
 
 		wg.Add(1)
 		go func(w *sync.WaitGroup, idx, start, size int64, rac *ReadAtCloser) {
-			rac.log.Infof("reading chunk %d", idx)
+			t := time.Now()
+			rac.log.Debugf("reading chunk %d", idx)
 			defer w.Done()
 			b := make([]byte, size)
 			if _, err := rac.ReadAt(b, start); err != nil {
@@ -421,6 +423,7 @@ func (r *ReadAtCloser) HashURL(scheme uint) ([]hash.Hash, error) {
 					return
 				}
 			}
+			rac.log.Debugf("finished reading chunk in %s", time.Since(t))
 
 			reader := bytes.NewReader(b[:])
 			h, err := hasher(reader)
@@ -431,7 +434,7 @@ func (r *ReadAtCloser) HashURL(scheme uint) ([]hash.Hash, error) {
 			}
 
 			hashes[idx] = h
-			rac.log.Infof("finished reading chunk %d", idx)
+			rac.log.Debugf("finished hashing chunk %d in %s", idx, time.Since(t))
 		}(&wg, i, start, remaining, r)
 	}
 
