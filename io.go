@@ -72,6 +72,7 @@ const ReadSizeLimit = 32768
 // Options contains the parts to create and use a ReadCloser or ReadAtCloser
 type Options struct {
 	client               *http.Client
+	ctx                  context.Context
 	hashChunkSize        int64
 	expectHeaders        map[string]string
 	maxConcurrentReaders int64
@@ -196,6 +197,13 @@ func WithClient(c *http.Client) Option {
 	}
 }
 
+// WithContext allows supplying a context for the ReadAtCloser to use.
+func WithContext(ctx context.Context) Option {
+	return func(o *Options) {
+		o.ctx = ctx
+	}
+}
+
 // WithURL (REQUIRED) is an Option func used to supply the full url string; scheme, host, and path, to be read.
 func WithURL(url string) Option {
 	return func(o *Options) {
@@ -277,12 +285,11 @@ func (o *Options) hashURL(hashSize uint) (hash.Hash, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer res.Body.Close()
 
 	if res.StatusCode < 200 || res.StatusCode > 399 {
 		return nil, RequestError{StatusCode: res.StatusCode, Url: o.url}
 	}
-
-	defer res.Body.Close()
 
 	switch hashSize {
 	case sha256.Size:
@@ -309,7 +316,7 @@ func (r *ReadAtCloser) HashURL(scheme uint) ([]hash.Hash, error) {
 	var chunks int64
 
 	// If chunkSize is greater than the content length reset it to the available length and set number of chunks to 1.
-	// Otherwise we need to divide the length by the number of chunks and round up. The final chunkSize will be the sum of the remainder.
+	// Otherwise, we need to divide the length by the number of chunks and round up. The final chunkSize will be the sum of the remainder.
 	if chunkSize > cl {
 		chunkSize = cl
 		chunks = 1
@@ -331,15 +338,21 @@ func (r *ReadAtCloser) HashURL(scheme uint) ([]hash.Hash, error) {
 	wg := sync.WaitGroup{}
 
 	for i := int64(0); i < chunks; i++ {
+		// The remaining size is the smaller of the chunkSize or the chunkSize times the number of chunks already read.
 		remaining := chunkSize
 		if remaining > cl-(i*chunkSize) {
 			remaining = cl - (i * chunkSize)
 		}
 
+		// If remaining ends up less than 0 then the math above to determine the number of chunks is incorrect or something bad happened.
+		if remaining < 0 {
+			return nil, errors.New("failed to properly calculate the hash chunk count")
+		}
+
 		start := chunkSize * i
 
 		wg.Add(1)
-		go func(w *sync.WaitGroup, idx int64, start, size int64, rac *ReadAtCloser) {
+		go func(w *sync.WaitGroup, idx, start, size int64, rac *ReadAtCloser) {
 			defer w.Done()
 			b := make([]byte, size)
 			if _, err := rac.ReadAt(b, start); err != nil {
@@ -370,14 +383,14 @@ func (r *ReadAtCloser) HashURL(scheme uint) ([]hash.Hash, error) {
 func checkErrSlice(es []error) (err error) {
 	for _, e := range es {
 		if e != nil {
-			if err == nil {
+			if err != nil {
 				err = fmt.Errorf("%s: %s", err, e)
 				continue
 			}
 			err = e
 		}
 	}
-	return nil
+	return
 }
 
 // Length returns the reported ContentLength of the URL body.
@@ -428,7 +441,7 @@ func (r *ReadAtCloser) ReadAt(b []byte, start int64) (n int, err error) {
 		return 0, err
 	}
 
-	if res.StatusCode != http.StatusPartialContent {
+	if res.StatusCode != http.StatusPartialContent && res.StatusCode != http.StatusOK {
 		return 0, ErrRangeReadNotSatisfied
 	}
 
